@@ -13,6 +13,13 @@
   delete); Supabase CLI authed.
 - **Phase 0**: plan approved and persisted as `MIGRATION_PLAN.md`; this
   status file created. Committed together.
+- **Phase 1**: Supabase re-provisioned. User deleted the Seoul project and
+  created **`llciwbpnlmlroromfdoc`** ("Vyay", `ap-south-1`, Postgres 17,
+  ACTIVE_HEALTHY); agent linked it via `supabase link`.
+  - OUTSTANDING USER ACTION (non-blocking until first migration run): add
+    `DATABASE_URL` (transaction pooler, port 6543) and
+    `MIGRATE_DATABASE_URL` (direct, port 5432) to local `.env`, copied from
+    dashboard → Connect. Direct host: `db.llciwbpnlmlroromfdoc.supabase.co`.
 
 ## In progress
 
@@ -21,16 +28,11 @@
 
 ## Next
 
-- **Phase 1 — Supabase re-provisioning** (`MIGRATION_PLAN.md` §Phase 1):
-  1. USER ACTION: create new project in `ap-south-1` (password stays with
-     user, never through agent):
-     `supabase projects create vyay-prod --org-id qwjneuxpugfinxqliktl --db-password <generated> --region ap-south-1 --size nano`
-  2. USER CONFIRMATION REQUIRED, then agent deletes the Seoul project
-     (`kknoqdkxyvdjvyfgeenu`) via `supabase projects delete`.
-  3. Agent: `supabase link --project-ref <new-ref>`.
-  4. USER ACTION: put pooled (port 6543) + direct (port 5432) connection
-     strings into `.env.local` as `DATABASE_URL` / `MIGRATE_DATABASE_URL`.
-- Then Phase 2 (schema/driver/test harness) per plan.
+- **Phase 2 — Postgres schema + driver + test harness** (`MIGRATION_PLAN.md`
+  §Phase 2): schema.ts → pg-core, drizzle.config dialect, regenerate
+  migrations, postgres.js driver (max:1, prepare:false), migrate.ts, PGlite
+  test harness, dependency swaps, .env.example. Gate: typecheck (vitest goes
+  green after Phase 3).
 
 ## Decisions log
 
