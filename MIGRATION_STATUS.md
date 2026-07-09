@@ -39,45 +39,37 @@
     mis-stated in the plan ("typecheck as Phase 2 gate"); real gates were:
     schema compiles in isolation, migration generates, deps install.
 
-- **Phase 3 batches A–C + most of D**: async conversion done for all core
-  lib (categorize, match, ingest, contacts/*, reparse), the whole gmail path
-  (sync.ts, client.ts — token event handler is fire-and-forget with
-  `.catch`, can't await in an event listener — and all 4 gmail routes), all
-  API routes (transactions, categories, rules, matches, contacts, tokens,
-  analytics, export, shortcut/log, register), and `src/auth.ts`.
-  Conversion conventions used everywhere:
-  `.all()` → `await q`; `.get()` → `(await q.limit(1))[0]`;
-  `.run()` → `await q`; better-sqlite3 `res.changes === 0` checks →
-  `.returning({id}).length === 0` (works on both postgres.js and PGlite);
-  `initialSyncDone` writes now use booleans.
+- **Phase 3: complete.** All 81 originally-counted sync call sites
+  converted (batches A–D: core lib, gmail path, API routes, auth.ts +
+  seed.ts), plus one site the original grep missed —
+  `src/app/api/contacts/import/route.ts` called `importContactsFromVCard()`
+  without awaiting it (that function has no direct `.get/.all/.run` call
+  itself, so it wasn't in the original 81-count; caught by `tsc`, not the
+  grep). Conversion conventions used everywhere: `.all()` → `await q`;
+  `.get()` → `(await q.limit(1))[0]`; `.run()` → `await q`; better-sqlite3
+  `res.changes === 0` checks → `.returning({id}).length === 0` (works on
+  both postgres.js and PGlite); `initialSyncDone` writes now use booleans.
+  - **Green gates all pass**: `npm run typecheck` clean; `npm run test` —
+    68/68 passing on the first-ever PGlite run, no driver quirks, no fixes
+    needed in `tests/helpers/pglite.ts`; `npm run lint` clean.
 
-## In progress — EXACT HANDOVER STATE (session wrapped up here)
+## In progress
 
-- **Phase 3 batch D is one file from done**: `src/lib/db/seed.ts` still has
-  the last **8 sync call sites** (verify with
-  `grep -E "\.(get|all|run)\(\)" src/` — only seed.ts should appear).
-  Same mechanical conversion as everywhere else; `main()` is already async.
-- **The repo does not typecheck until seed.ts is converted** (expected and
-  tracked since Phase 2 — this is the known red→green arc, nothing is
-  broken beyond that one file).
-- After seed.ts, run the Phase 3 end gates, all of which are still pending:
-  1. `npm run typecheck` → must be green
-  2. `npm run test` → 68 tests must pass on the new PGlite harness
-     (first PGlite run may surface driver quirks — e.g. `.returning()`
-     shapes or DO-block DDL in tests/helpers/pglite.ts; fix there, not in
-     app code, unless app code is genuinely wrong)
-  3. `npm run lint`
-  4. Commit "Phase 3 batch D + green gates", push.
+- Nothing mid-flight. Repo is fully green on Postgres/postgres.js/PGlite.
 
 ## Next
 
-- Finish batch D as above, then **Phase 4 — Google-only auth +
-  tenant-isolation audit** (`MIGRATION_PLAN.md` §Phase 4). Reminder: the
-  known cross-tenant bug (`unseenIds()` in sync.ts missing a userId filter)
-  is deliberately NOT yet fixed — it belongs to Phase 4 step 2.
+- **Phase 4 — Google-only auth + tenant-isolation audit**
+  (`MIGRATION_PLAN.md` §Phase 4): remove credentials provider from
+  `auth.ts`, delete `/register` page + `/api/register`, strip password
+  fields from the login form; fix the known cross-tenant bug (`unseenIds()`
+  in `sync.ts` missing a `userId` filter — deliberately left unfixed until
+  now); systematic audit of every query for a userId predicate; add a
+  tenant-isolation regression test.
 - User-side prerequisite still outstanding (needed before the first
   `npx tsx migrate.ts` run, not before Phase 4): `DATABASE_URL` +
-  `MIGRATE_DATABASE_URL` in local `.env` (see Phase 1 notes above).
+  `MIGRATE_DATABASE_URL` in local `.env` — **done**, both are set in
+  `.env` as of this session.
 - **Vercel Git auto-deploy is DISCONNECTED** (`vercel git disconnect`,
   2026-07-09) — every mid-migration push was triggering a doomed production
   build + failure email. **Phase 7 must run `vercel git connect` after the

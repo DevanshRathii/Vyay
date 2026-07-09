@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   const text = await req.text();
   if (!text.trim()) return badRequest("Empty file.");
 
-  const summary = importContactsFromVCard(userId, text);
+  const summary = await importContactsFromVCard(userId, text);
   if (summary.parsed === 0) return badRequest("No contacts found — is this a valid .vcf file?");
   return NextResponse.json(summary);
 }

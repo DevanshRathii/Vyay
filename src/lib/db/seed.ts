@@ -56,21 +56,19 @@ function jitter(base: number, pct = 0.35): number {
 
 async function main() {
   const email = "demo@vyay.app";
-  const existing = db.select().from(users).where(eq(users.email, email)).get();
+  const existing = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
   if (existing) {
     console.log("Demo user already exists — deleting and re-seeding.");
-    db.delete(users).where(eq(users.id, existing.id)).run();
+    await db.delete(users).where(eq(users.id, existing.id));
   }
 
   const passwordHash = await bcrypt.hash("demo1234", 12);
-  const user = db
-    .insert(users)
-    .values({ email, name: "Demo User", passwordHash })
-    .returning()
-    .get();
+  const user = (
+    await db.insert(users).values({ email, name: "Demo User", passwordHash }).returning()
+  )[0];
 
-  ensureDefaultCategories(user.id);
-  const cats = db.select().from(categories).where(eq(categories.userId, user.id)).all();
+  await ensureDefaultCategories(user.id);
+  const cats = await db.select().from(categories).where(eq(categories.userId, user.id));
   const catId = (name: string | null) =>
     name ? (cats.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id ?? null) : null;
 
@@ -84,26 +82,24 @@ async function main() {
     const occurredAt =
       now - daysAgo * DAY - Math.floor(Math.random() * 12) * 3600 * 1000;
     const amountPaise = jitter(spec.amount) * 100;
-    db.insert(transactions)
-      .values({
-        userId: user.id,
-        source: "seed",
-        occurredAt: Math.floor(occurredAt),
-        amountPaise,
-        currency: "INR",
-        direction: spec.direction ?? "debit",
-        merchant: spec.merchant,
-        merchantNormalized: normalizeMerchant(spec.merchant),
-        channel: spec.channel,
-        bank: spec.bank,
-        upiId: spec.upiId ?? null,
-        cardLast4: spec.cardLast4 ?? null,
-        referenceNumber: String(400000000000 + Math.floor(Math.random() * 99999999999)),
-        emailSubject: `You have done a ${spec.channel} txn of Rs ${(amountPaise / 100).toFixed(2)}`,
-        confidence: 0.9,
-        categoryId: catId(spec.category),
-      })
-      .run();
+    await db.insert(transactions).values({
+      userId: user.id,
+      source: "seed",
+      occurredAt: Math.floor(occurredAt),
+      amountPaise,
+      currency: "INR",
+      direction: spec.direction ?? "debit",
+      merchant: spec.merchant,
+      merchantNormalized: normalizeMerchant(spec.merchant),
+      channel: spec.channel,
+      bank: spec.bank,
+      upiId: spec.upiId ?? null,
+      cardLast4: spec.cardLast4 ?? null,
+      referenceNumber: String(400000000000 + Math.floor(Math.random() * 99999999999)),
+      emailSubject: `You have done a ${spec.channel} txn of Rs ${(amountPaise / 100).toFixed(2)}`,
+      confidence: 0.9,
+      categoryId: catId(spec.category),
+    });
     count++;
   }
 
@@ -112,70 +108,67 @@ async function main() {
     const d = new Date(now);
     d.setMonth(d.getMonth() - monthsAgo, 1);
     d.setHours(10, 12, 0, 0);
-    db.insert(transactions)
-      .values({
-        userId: user.id,
-        source: "seed",
-        occurredAt: d.getTime(),
-        amountPaise: 8_500_000,
-        currency: "INR",
-        direction: "credit",
-        merchant: "Acme Technologies Salary",
-        merchantNormalized: normalizeMerchant("Acme Technologies Salary"),
-        channel: "NEFT",
-        bank: "HDFC Bank",
-        referenceNumber: `N${Math.floor(Math.random() * 1e12)}`,
-        emailSubject: "Credit alert: NEFT received in your account",
-        confidence: 0.95,
-        categoryId: catId("Income"),
-      })
-      .run();
+    await db.insert(transactions).values({
+      userId: user.id,
+      source: "seed",
+      occurredAt: d.getTime(),
+      amountPaise: 8_500_000,
+      currency: "INR",
+      direction: "credit",
+      merchant: "Acme Technologies Salary",
+      merchantNormalized: normalizeMerchant("Acme Technologies Salary"),
+      channel: "NEFT",
+      bank: "HDFC Bank",
+      referenceNumber: `N${Math.floor(Math.random() * 1e12)}`,
+      emailSubject: "Credit alert: NEFT received in your account",
+      confidence: 0.95,
+      categoryId: catId("Income"),
+    });
     count++;
   }
 
   // A flagged duplicate pair (same amount, 90 seconds apart).
   const dupAt = now - 1 * DAY; // within the 72h Shortcut match window
-  const base = db
-    .insert(transactions)
-    .values({
-      userId: user.id,
-      source: "seed",
-      occurredAt: dupAt,
-      amountPaise: 49900,
-      currency: "INR",
-      direction: "debit",
-      merchant: "Swiggy",
-      merchantNormalized: normalizeMerchant("Swiggy"),
-      channel: "UPI",
-      bank: "HDFC Bank",
-      upiId: "swiggy@icici",
-      referenceNumber: "412345678901",
-      emailSubject: "You have done a UPI txn of Rs 499.00",
-      confidence: 0.9,
-      categoryId: catId("Food & Dining"),
-    })
-    .returning()
-    .get();
-  db.insert(transactions)
-    .values({
-      userId: user.id,
-      source: "seed",
-      occurredAt: dupAt + 90 * 1000,
-      amountPaise: 49900,
-      currency: "INR",
-      direction: "debit",
-      merchant: "Swiggy",
-      merchantNormalized: normalizeMerchant("Swiggy"),
-      channel: "UPI",
-      bank: "HDFC Bank",
-      upiId: "swiggy@icici",
-      referenceNumber: "412345678902",
-      emailSubject: "UPI transaction alert",
-      confidence: 0.85,
-      categoryId: catId("Food & Dining"),
-      duplicateOfId: base.id,
-    })
-    .run();
+  const base = (
+    await db
+      .insert(transactions)
+      .values({
+        userId: user.id,
+        source: "seed",
+        occurredAt: dupAt,
+        amountPaise: 49900,
+        currency: "INR",
+        direction: "debit",
+        merchant: "Swiggy",
+        merchantNormalized: normalizeMerchant("Swiggy"),
+        channel: "UPI",
+        bank: "HDFC Bank",
+        upiId: "swiggy@icici",
+        referenceNumber: "412345678901",
+        emailSubject: "You have done a UPI txn of Rs 499.00",
+        confidence: 0.9,
+        categoryId: catId("Food & Dining"),
+      })
+      .returning()
+  )[0];
+  await db.insert(transactions).values({
+    userId: user.id,
+    source: "seed",
+    occurredAt: dupAt + 90 * 1000,
+    amountPaise: 49900,
+    currency: "INR",
+    direction: "debit",
+    merchant: "Swiggy",
+    merchantNormalized: normalizeMerchant("Swiggy"),
+    channel: "UPI",
+    bank: "HDFC Bank",
+    upiId: "swiggy@icici",
+    referenceNumber: "412345678902",
+    emailSubject: "UPI transaction alert",
+    confidence: 0.85,
+    categoryId: catId("Food & Dining"),
+    duplicateOfId: base.id,
+  });
   count += 2;
 
   console.log(`Seeded ${count} transactions for ${email} (password: demo1234).`);
