@@ -10,12 +10,12 @@ export const MATCH_WINDOW_HOURS = 72;
  * exact amount, same direction, within the time window, not deleted.
  * Uncategorized transactions are preferred, then closest in time.
  */
-export function findCandidates(
+export async function findCandidates(
   userId: string,
   opts: { amountPaise: number; direction: string; at: number; limit?: number },
-): Transaction[] {
+): Promise<Transaction[]> {
   const windowMs = MATCH_WINDOW_HOURS * 3600 * 1000;
-  const rows = db
+  return db
     .select()
     .from(transactions)
     .where(
@@ -29,34 +29,36 @@ export function findCandidates(
       ),
     )
     .orderBy(asc(sql`${transactions.categoryId} IS NOT NULL`), asc(sql`abs(${transactions.occurredAt} - ${opts.at})`))
-    .limit(opts.limit ?? 5)
-    .all();
-  return rows;
+    .limit(opts.limit ?? 5);
 }
 
 /** Apply a shortcut event's category/notes to a transaction and close the event. */
-export function applyEventToTransaction(event: ShortcutEvent, transactionId: string, status: "matched" | "resolved") {
-  db.update(transactions)
+export async function applyEventToTransaction(
+  event: ShortcutEvent,
+  transactionId: string,
+  status: "matched" | "resolved",
+): Promise<void> {
+  await db
+    .update(transactions)
     .set({
       categoryId: event.categoryId,
       notes: event.notes ?? undefined,
       updatedAt: Date.now(),
     })
-    .where(and(eq(transactions.id, transactionId), eq(transactions.userId, event.userId)))
-    .run();
-  db.update(shortcutEvents)
+    .where(and(eq(transactions.id, transactionId), eq(transactions.userId, event.userId)));
+  await db
+    .update(shortcutEvents)
     .set({ status, matchedTransactionId: transactionId })
-    .where(eq(shortcutEvents.id, event.id))
-    .run();
+    .where(eq(shortcutEvents.id, event.id));
 }
 
 /**
  * Called after a new transaction is ingested: if a pending Shortcut event is
  * waiting for exactly this amount/direction near this time, resolve it.
  */
-export function tryResolvePendingShortcuts(userId: string, txn: Transaction): void {
+export async function tryResolvePendingShortcuts(userId: string, txn: Transaction): Promise<void> {
   const windowMs = MATCH_WINDOW_HOURS * 3600 * 1000;
-  const pending = db
+  const pending = await db
     .select()
     .from(shortcutEvents)
     .where(
@@ -69,9 +71,8 @@ export function tryResolvePendingShortcuts(userId: string, txn: Transaction): vo
         lte(shortcutEvents.createdAt, txn.occurredAt + windowMs),
       ),
     )
-    .orderBy(asc(shortcutEvents.createdAt))
-    .all();
+    .orderBy(asc(shortcutEvents.createdAt));
   if (pending.length === 0) return;
   // Resolve the oldest waiting event with this fresh transaction.
-  applyEventToTransaction(pending[0], txn.id, "matched");
+  await applyEventToTransaction(pending[0], txn.id, "matched");
 }

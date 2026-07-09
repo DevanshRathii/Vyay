@@ -78,8 +78,8 @@ export interface ContactContext {
   all: Contact[];
 }
 
-export function loadContactContext(userId: string): ContactContext {
-  const rows = db.select().from(contacts).where(eq(contacts.userId, userId)).all();
+export async function loadContactContext(userId: string): Promise<ContactContext> {
+  const rows = await db.select().from(contacts).where(eq(contacts.userId, userId));
   const byPhone = new Map<string, Contact>();
   const byEmailLocalPart = new Map<string, Contact>();
   const byName = new Map<string, Contact>();

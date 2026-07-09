@@ -143,12 +143,12 @@ export const BUILTIN_RULES: Array<{ pattern: string; category: string; exclude?:
   { pattern: "insurance", category: "Insurance" },
 ];
 
-export function ensureDefaultCategories(userId: string): void {
-  const existing = db.select().from(categories).where(eq(categories.userId, userId)).all();
+export async function ensureDefaultCategories(userId: string): Promise<void> {
+  const existing = await db.select().from(categories).where(eq(categories.userId, userId));
   if (existing.length > 0) return;
-  db.insert(categories)
-    .values(DEFAULT_CATEGORIES.map((c) => ({ userId, name: c.name, color: c.color })))
-    .run();
+  await db
+    .insert(categories)
+    .values(DEFAULT_CATEGORIES.map((c) => ({ userId, name: c.name, color: c.color })));
 }
 
 export interface CategorizerContext {
@@ -157,9 +157,9 @@ export interface CategorizerContext {
   categoryIdByLowerName: Map<string, string>;
 }
 
-export function loadCategorizerContext(userId: string): CategorizerContext {
-  const userRules = db.select().from(merchantRules).where(eq(merchantRules.userId, userId)).all();
-  const cats = db.select().from(categories).where(eq(categories.userId, userId)).all();
+export async function loadCategorizerContext(userId: string): Promise<CategorizerContext> {
+  const userRules = await db.select().from(merchantRules).where(eq(merchantRules.userId, userId));
+  const cats = await db.select().from(categories).where(eq(categories.userId, userId));
   return {
     userRules,
     categoriesById: new Map(cats.map((c) => [c.id, c])),
@@ -198,11 +198,10 @@ export function categorize(
   return null;
 }
 
-export function findCategoryByName(userId: string, name: string): Category | undefined {
-  return db
+export async function findCategoryByName(userId: string, name: string): Promise<Category | undefined> {
+  const rows = await db
     .select()
     .from(categories)
-    .where(and(eq(categories.userId, userId)))
-    .all()
-    .find((c) => c.name.toLowerCase() === name.trim().toLowerCase());
+    .where(and(eq(categories.userId, userId)));
+  return rows.find((c) => c.name.toLowerCase() === name.trim().toLowerCase());
 }

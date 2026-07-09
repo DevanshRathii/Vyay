@@ -17,26 +17,27 @@ export type IngestOutcome =
 /** Mark near-identical transactions (same amount/direction within 3 minutes). */
 const DUPLICATE_WINDOW_MS = 3 * 60 * 1000;
 
-function flagPotentialDuplicate(txn: Transaction): void {
-  const twin = db
-    .select()
-    .from(transactions)
-    .where(
-      and(
-        eq(transactions.userId, txn.userId),
-        eq(transactions.amountPaise, txn.amountPaise),
-        eq(transactions.direction, txn.direction),
-        gte(transactions.occurredAt, txn.occurredAt - DUPLICATE_WINDOW_MS),
-        lte(transactions.occurredAt, txn.occurredAt + DUPLICATE_WINDOW_MS),
-        ne(transactions.id, txn.id),
-        isNull(transactions.deletedAt),
-        isNull(transactions.duplicateOfId),
-      ),
-    )
-    .limit(1)
-    .all()[0];
+async function flagPotentialDuplicate(txn: Transaction): Promise<void> {
+  const twin = (
+    await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.userId, txn.userId),
+          eq(transactions.amountPaise, txn.amountPaise),
+          eq(transactions.direction, txn.direction),
+          gte(transactions.occurredAt, txn.occurredAt - DUPLICATE_WINDOW_MS),
+          lte(transactions.occurredAt, txn.occurredAt + DUPLICATE_WINDOW_MS),
+          ne(transactions.id, txn.id),
+          isNull(transactions.deletedAt),
+          isNull(transactions.duplicateOfId),
+        ),
+      )
+      .limit(1)
+  )[0];
   if (twin) {
-    db.update(transactions).set({ duplicateOfId: twin.id }).where(eq(transactions.id, txn.id)).run();
+    await db.update(transactions).set({ duplicateOfId: twin.id }).where(eq(transactions.id, txn.id));
     txn.duplicateOfId = twin.id;
   }
 }
@@ -45,12 +46,12 @@ function flagPotentialDuplicate(txn: Transaction): void {
  * Process one Gmail message end to end. Idempotent: the unique index on
  * (userId, gmailMessageId) makes re-ingesting the same message a no-op.
  */
-export function ingestEmail(
+export async function ingestEmail(
   userId: string,
   email: EmailMessage,
   ctx: CategorizerContext,
   contactCtx: ContactContext,
-): IngestOutcome {
+): Promise<IngestOutcome> {
   const detection = classifyEmail(email);
   if (!detection.isTransaction) return { status: "skipped", reason: detection.reason };
 
@@ -70,7 +71,7 @@ export function ingestEmail(
     subject: email.subject,
   });
 
-  const inserted = db
+  const insertedRows = await db
     .insert(transactions)
     .values({
       userId,
@@ -100,12 +101,12 @@ export function ingestEmail(
       }),
     })
     .onConflictDoNothing()
-    .returning()
-    .all()[0];
+    .returning();
+  const inserted = insertedRows[0];
 
   if (!inserted) return { status: "duplicate-message" };
 
-  flagPotentialDuplicate(inserted);
-  tryResolvePendingShortcuts(userId, inserted);
+  await flagPotentialDuplicate(inserted);
+  await tryResolvePendingShortcuts(userId, inserted);
   return { status: "inserted", transaction: inserted };
 }

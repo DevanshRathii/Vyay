@@ -34,7 +34,7 @@ interface RawPayload {
  * retroactively fix merchant names on transactions synced before they existed.
  */
 export async function reparseUserTransactions(userId: string): Promise<ReparseSummary> {
-  const rows = db
+  const rows = await db
     .select()
     .from(transactions)
     .where(
@@ -44,11 +44,10 @@ export async function reparseUserTransactions(userId: string): Promise<ReparseSu
         isNotNull(transactions.raw),
         isNull(transactions.deletedAt),
       ),
-    )
-    .all();
+    );
 
-  const ctx = loadCategorizerContext(userId);
-  const contactCtx = loadContactContext(userId);
+  const ctx = await loadCategorizerContext(userId);
+  const contactCtx = await loadContactContext(userId);
   let updated = 0;
 
   for (let i = 0; i < rows.length; i++) {
@@ -107,7 +106,7 @@ export async function reparseUserTransactions(userId: string): Promise<ReparseSu
 
       if (Object.keys(updates).length > 0) {
         updates.updatedAt = Date.now();
-        db.update(transactions).set(updates).where(eq(transactions.id, txn.id)).run();
+        await db.update(transactions).set(updates).where(eq(transactions.id, txn.id));
         updated++;
       }
     }

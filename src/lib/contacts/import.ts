@@ -13,7 +13,7 @@ export interface ImportSummary {
 }
 
 /** Import (or merge into existing) contacts from a .vcf file's raw text. */
-export function importContactsFromVCard(userId: string, vcfText: string): ImportSummary {
+export async function importContactsFromVCard(userId: string, vcfText: string): Promise<ImportSummary> {
   const cards = parseVCard(vcfText);
   let imported = 0;
   let updated = 0;
@@ -28,11 +28,13 @@ export function importContactsFromVCard(userId: string, vcfText: string): Import
     const phones = Array.from(new Set(card.phones.map(normalizePhone).filter((p): p is string => p !== null)));
     const emails = Array.from(new Set(card.emails.map(normalizeEmail).filter((e): e is string => e !== null)));
 
-    const existing = db
-      .select()
-      .from(contacts)
-      .where(and(eq(contacts.userId, userId), eq(contacts.nameNormalized, nameNormalized)))
-      .get();
+    const existing = (
+      await db
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.userId, userId), eq(contacts.nameNormalized, nameNormalized)))
+        .limit(1)
+    )[0];
 
     if (existing) {
       const existingPhones: string[] = JSON.parse(existing.phones || "[]");
@@ -40,18 +42,18 @@ export function importContactsFromVCard(userId: string, vcfText: string): Import
       const mergedPhones = Array.from(new Set([...existingPhones, ...phones]));
       const mergedEmails = Array.from(new Set([...existingEmails, ...emails]));
       if (mergedPhones.length !== existingPhones.length || mergedEmails.length !== existingEmails.length) {
-        db.update(contacts)
+        await db
+          .update(contacts)
           .set({ phones: JSON.stringify(mergedPhones), emails: JSON.stringify(mergedEmails) })
-          .where(eq(contacts.id, existing.id))
-          .run();
+          .where(eq(contacts.id, existing.id));
         updated++;
       } else {
         skipped++;
       }
     } else {
-      db.insert(contacts)
-        .values({ userId, name: card.name, nameNormalized, phones: JSON.stringify(phones), emails: JSON.stringify(emails) })
-        .run();
+      await db
+        .insert(contacts)
+        .values({ userId, name: card.name, nameNormalized, phones: JSON.stringify(phones), emails: JSON.stringify(emails) });
       imported++;
     }
   }
