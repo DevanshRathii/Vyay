@@ -1,0 +1,148 @@
+"use client";
+
+import { Check, GitMerge, X } from "lucide-react";
+import { useState } from "react";
+import useSWR from "swr";
+import { Badge, Button, Card, Empty, Spinner } from "@/components/ui";
+import { cn, formatINR } from "@/lib/utils";
+
+interface Candidate {
+  id: string;
+  occurredAt: number;
+  merchant: string | null;
+  channel: string | null;
+  bank: string | null;
+  amountPaise: number;
+  categoryId: string | null;
+}
+
+interface PendingEvent {
+  id: string;
+  createdAt: number;
+  amountPaise: number;
+  direction: string;
+  categoryName: string;
+  notes: string | null;
+  candidates: Candidate[];
+}
+
+function fmt(ms: number) {
+  return new Date(ms).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+export function MatchesList() {
+  const { data, mutate } = useSWR<{ rows: PendingEvent[] }>("/api/matches");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, string>>({});
+
+  async function act(eventId: string, action: "resolve" | "dismiss", transactionId?: string) {
+    setBusy(eventId);
+    await fetch(`/api/matches/${eventId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, transactionId }),
+    });
+    setBusy(null);
+    mutate();
+  }
+
+  if (!data) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Spinner className="h-6 w-6" />
+      </div>
+    );
+  }
+
+  if (data.rows.length === 0) {
+    return (
+      <Card>
+        <Empty
+          icon={<GitMerge className="h-8 w-8" />}
+          title="Nothing to resolve"
+          hint="When an Apple Shortcut log matches several transactions — or none yet — it appears here for a decision."
+        />
+      </Card>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {data.rows.map((e) => {
+        const chosen = selected[e.id] ?? (e.candidates.length === 1 ? e.candidates[0].id : "");
+        return (
+          <Card key={e.id} className="p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-[14px] font-semibold tabular-nums">
+                  {formatINR(e.amountPaise)} <span className="font-normal text-muted">{e.direction}</span>
+                </p>
+                <p className="mt-0.5 text-[12px] text-muted">
+                  Logged {fmt(e.createdAt)} · <Badge>{e.categoryName}</Badge>
+                  {e.notes && <span className="ml-1.5">“{e.notes}”</span>}
+                </p>
+              </div>
+              <div className="flex gap-1.5">
+                <Button
+                  size="sm"
+                  disabled={!chosen || busy === e.id}
+                  onClick={() => act(e.id, "resolve", chosen)}
+                >
+                  {busy === e.id ? <Spinner className="border-white/40 border-t-white" /> : <Check className="h-3.5 w-3.5" />}
+                  Apply
+                </Button>
+                <Button variant="secondary" size="sm" disabled={busy === e.id} onClick={() => act(e.id, "dismiss")}>
+                  <X className="h-3.5 w-3.5" /> Dismiss
+                </Button>
+              </div>
+            </div>
+
+            {e.candidates.length === 0 ? (
+              <p className="mt-3 rounded-xl bg-card-2 px-3.5 py-2.5 text-[13px] text-muted">
+                No matching email yet — this will auto-resolve when the transaction email arrives, or you can dismiss it.
+              </p>
+            ) : (
+              <div className="mt-3 flex flex-col gap-1.5">
+                {e.candidates.map((c) => (
+                  <label
+                    key={c.id}
+                    className={cn(
+                      "flex cursor-pointer items-center justify-between rounded-xl border px-3.5 py-2.5 text-[13px]",
+                      chosen === c.id ? "border-accent bg-accent/5" : "border-line bg-card-2/50 hover:border-accent/40",
+                    )}
+                  >
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <input
+                        type="radio"
+                        name={`cand-${e.id}`}
+                        checked={chosen === c.id}
+                        onChange={() => setSelected((s) => ({ ...s, [e.id]: c.id }))}
+                        className="h-4 w-4 accent-[var(--accent)]"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium capitalize">{c.merchant ?? "Transaction"}</span>
+                        <span className="block text-[12px] text-muted">
+                          {fmt(c.occurredAt)}
+                          {c.channel ? ` · ${c.channel}` : ""}
+                          {c.bank ? ` · ${c.bank}` : ""}
+                          {c.categoryId ? " · already categorized" : ""}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="ml-3 shrink-0 tabular-nums font-medium">{formatINR(c.amountPaise)}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}

@@ -1,0 +1,64 @@
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { gmailConnections } from "@/lib/db/schema";
+import { getUserId } from "@/lib/session";
+import { encrypt, verifyState } from "@/lib/crypto";
+import { oauthClient } from "@/lib/gmail/client";
+import { syncUser } from "@/lib/gmail/sync";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const appUrl = process.env.APP_URL ?? url.origin;
+  const fail = (reason: string) =>
+    NextResponse.redirect(`${appUrl}/settings?gmail_error=${encodeURIComponent(reason)}`);
+
+  const userId = await getUserId();
+  if (!userId) return NextResponse.redirect(`${appUrl}/login`);
+
+  if (url.searchParams.get("error")) return fail(url.searchParams.get("error")!);
+
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code || !state) return fail("Missing authorization code.");
+
+  const verified = verifyState(state);
+  if (!verified || verified.split(":")[0] !== userId) return fail("State verification failed.");
+
+  const client = oauthClient();
+  const { tokens } = await client.getToken(code);
+  if (!tokens.access_token || !tokens.refresh_token) {
+    return fail(
+      "Google did not return a refresh token. Remove the app's access in your Google account settings and try again.",
+    );
+  }
+
+  // Fetch the Gmail address for display.
+  client.setCredentials(tokens);
+  const { gmail } = await import("@googleapis/gmail");
+  const g = gmail({ version: "v1", auth: client });
+  const profile = await g.users.getProfile({ userId: "me" });
+  const emailAddress = profile.data.emailAddress ?? "unknown";
+
+  const values = {
+    userId,
+    emailAddress,
+    accessToken: encrypt(tokens.access_token),
+    refreshToken: encrypt(tokens.refresh_token),
+    expiryDate: tokens.expiry_date ?? null,
+    historyId: null,
+    initialSyncDone: 0,
+    syncStatus: "idle",
+    syncError: null,
+  };
+  db.insert(gmailConnections)
+    .values(values)
+    .onConflictDoUpdate({ target: gmailConnections.userId, set: values })
+    .run();
+
+  // Kick off the initial sync without blocking the redirect.
+  syncUser(userId).catch((err) => console.error("[vyay] initial sync failed:", err));
+
+  return NextResponse.redirect(`${appUrl}/settings?gmail_connected=1`);
+}
