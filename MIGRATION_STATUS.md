@@ -223,15 +223,10 @@
     test-mode refresh-token expiry), and an updated Privacy & security
     section (multi-tenant isolation language, no more bcrypt/"one SQLite
     file" claims).
-  - **`CLAUDE.md` intentionally NOT updated yet** — it's stale in several
-    places (describes boot-time auto-migration, the deleted Credentials
-    provider, better-sqlite3) but updating it is explicitly a Phase 8 item
-    per the plan, not Phase 7. Don't mistake this for an oversight if
-    picking up mid-Phase-8.
   - Green gates all pass: typecheck clean; `npm run test` — 72/72; lint
     clean.
 
-- **Phase 8 (in progress).** `CLAUDE.md` rewritten for the current
+- **Phase 8: complete.** `CLAUDE.md` rewritten for the current
   architecture (Postgres/multi-tenant/Vercel, async DB, Google-only auth,
   DB-backed sync lock/progress, cron). Git auto-deploy reconnected and
   proven working (a routine push auto-deployed successfully).
@@ -289,19 +284,20 @@
      `https://vyay-five.vercel.app/api/auth/callback/google` and
      `https://vyay-five.vercel.app/api/gmail/callback` in Google Cloud
      Console → Credentials.
-  3. **Real bug: large initial Gmail syncs get hard-killed mid-flight by
-     Vercel's 300s `maxDuration`, leaving the account stuck in
-     `syncStatus: "syncing"` forever (until the 10-min staleness window).**
-     Found via direct (user-approved) read-only query against
-     `gmail_connections` for the affected account: `sync_status: "syncing"`,
-     18.8 minutes elapsed, `sync_progress_done: 440` of `1401`,
-     `sync_error: null` (null because the process was hard-killed by the
-     platform, never reached the code that would have written a graceful
-     error). `waitUntil()` (added in Phase 5) keeps the function alive
-     past the HTTP response returning, but does **not** extend
-     `maxDuration` — this is a real gap Phase 5's design didn't cover:
-     the cron sweep already had a clean 250s cutoff *between users*, but a
-     single user's initial sync had no cutoff *within* itself.
+  3. **Real bug, fixed and deployed: large initial Gmail syncs get
+     hard-killed mid-flight by Vercel's 300s `maxDuration`, leaving the
+     account stuck in `syncStatus: "syncing"` forever (until the 10-min
+     staleness window).** Found via direct (user-approved) read-only query
+     against `gmail_connections` for the affected account:
+     `sync_status: "syncing"`, 18.8 minutes elapsed,
+     `sync_progress_done: 440` of `1401`, `sync_error: null` (null because
+     the process was hard-killed by the platform, never reached the code
+     that would have written a graceful error). `waitUntil()` (added in
+     Phase 5) keeps the function alive past the HTTP response returning,
+     but does **not** extend `maxDuration` — this is a real gap Phase 5's
+     design didn't cover: the cron sweep already had a clean 250s cutoff
+     *between users*, but a single user's initial sync had no cutoff
+     *within* itself.
      - **Fix**: added a `SYNC_TIME_BUDGET_MS = 250_000` wall-clock budget
        checked inside `fetchAndIngest`'s per-message loop and both
        `fullSync`/`incrementalSync`'s listing loops
@@ -316,52 +312,106 @@
        deadline hit keeps it `false`), so a timed-out sync correctly
        retries via `fullSync` again next time rather than switching to
        incremental-only coverage. `syncUser()` computes one deadline up
-       front and threads it through. Net effect: a big backlog now
-       completes over a few "Sync now" clicks (or daily cron runs)
-       instead of wedging indefinitely on the first one. typecheck/test
-       (72/72)/lint all green; **not yet deployed** — see below.
-  4. **Apple Shortcut "network connection lost"** — investigated via
-     `vercel logs` and found **zero requests ever reached the server**
-     for the real POST attempt, ruling out a server-side bug; a follow-up
-     GET-in-Safari test to the same URL *did* reach the server (405, as
-     expected for a POST-only route — confirms DNS/TLS/routing are fine).
-     Likely a transient client-side issue (possibly coinciding with the
-     env-var/redeploy churn happening at the same time) or a Shortcuts-app
-     configuration detail we haven't pinned down yet. **Unresolved** —
-     user asked to retry now that the domain is confirmed reachable; if it
-     still fails, need the exact Shortcut action configuration to debug
-     further. Not a migration-created bug as far as we can tell (the route
-     itself is unchanged since Phase 3's async conversion and has always
-     behaved this way in principle).
+       front and threads it through. typecheck/test (72/72)/lint all
+       green.
+     - **Deployed and verified**: pushed, auto-deploy built successfully,
+       user clicked "Sync now" again on the stuck account — the stale
+       (>10min) lock was reclaimed automatically and the sync resumed
+       progressing past 440/1401.
+  4. **Apple Shortcut "network connection lost", then several follow-on
+     errors — fully resolved, root cause was never a server bug.** Traced
+     through multiple layers with the user, in order:
+     - The original "network connection lost" was the Shortcut's JSON
+       body being **pasted as raw text** instead of built with Shortcuts'
+       structured field UI — malformed/mis-encoded raw text can fail to
+       leave the Shortcuts networking layer cleanly, surfacing as a vague
+       connectivity error rather than an HTTP error. Ruled out DNS/TLS/
+       network path first (`vercel logs` showed zero requests ever
+       reaching the server for the real attempt; a control GET request to
+       the same URL from Safari *did* reach the server with the expected
+       405, proving reachability); ruled out WiFi/cellular/iCloud Private
+       Relay (user tested all three with no change) before landing on the
+       actual cause.
+     - Fixed by rebuilding the body with Shortcuts' "Add new field" UI →
+       got a real HTTP response, but then `"number must be greater than
+       0"`, then `"expected number, received nan"` — both were the
+       `amount` field's value not being wired to the right variable/format.
+     - Final root cause, found by temporarily adding debug logging
+       (`console.log` of the raw request body/content-type in
+       `src/app/api/shortcut/log/route.ts`, deployed, inspected via
+       `vercel logs --expand`, then fully reverted once diagnosed — never
+       committed to git, so no permanent trace in history): the JSON
+       field **key names** had typos — `category200`/`amount200` (an
+       apparent artifact of how the user was editing the field key text),
+       then briefly a single stray `"200"` key — instead of `category`/
+       `amount`. Once corrected to the exact expected key names, the
+       request succeeded (`200`, real `shortcutEvents` row created).
+     - **No code changes were needed or made** to fix this — the debug
+       logging was added and removed in the same session, never merged.
+       The route's behavior was correct throughout; this was purely a
+       client-side Shortcut configuration issue, notable mainly for how
+       long it took to diagnose without visual access to the user's
+       Shortcut. Worth considering for a future session: the server could
+       return a more diagnostic 400 error body (e.g. echoing which keys
+       it did receive) to make this class of client misconfiguration
+       faster to self-diagnose — not done here, out of scope for the
+       migration itself.
 
-## In progress
+  **Phase 8 smoke-test checklist — closed out.**
+  - ✅ Google sign-in, Gmail connect (readonly scope), initial sync
+    populating the ledger, manual "Sync now" — exercised live during the
+    bug-hunting above.
+  - ✅ Excel export, contacts `.vcf` import, re-parse, tenant isolation
+    between two real signed-in accounts — all confirmed working by the
+    user.
+  - ⏸ **Cron with the real `CRON_SECRET` — deferred, not blocking.**
+    Confirmed via `vercel cron ls` that the job itself is correctly
+    registered (`/api/cron/sync` at `30 2 * * *` = 08:00 IST); it simply
+    hasn't fired yet as of this session. Will self-verify at the next
+    scheduled run (check Vercel dashboard → Cron Jobs → Logs), or the user
+    can test manually anytime with
+    `curl -H "Authorization: Bearer <CRON_SECRET>" https://vyay-five.vercel.app/api/cron/sync`
+    (expect `200` + a JSON summary). The negative case (401 without a
+    valid secret) was already verified earlier.
+  - ✅ Stray pre-migration deployment — checked via `vercel ls`: it shows
+    `Ready` (not `Error`), 16h old, simply superseded by every deployment
+    since — confirmed harmless, no cleanup needed. (The handful of
+    `Error`-status deployments visible in history are from this session's
+    own troubleshooting — ENETUNREACH, BOM env vars — equally harmless
+    now that the current deployment is healthy.)
 
-- **The sync-timeout fix (item 3 above) is committed locally but not yet
-  deployed or verified in production.** Next action: commit, push (auto-deploy
-  will pick it up), then have the user click "Sync now" again on the
-  account that's stuck at 440/1401 — the >10-minute-stale lock will be
-  reclaimed automatically, and this time it should stop cleanly under
-  budget instead of wedging again if it doesn't finish in one pass.
-- Item 4 (Apple Shortcut) is unresolved, waiting on the user's retry / more
-  detail if it fails again.
+## Migration status: COMPLETE
 
-## Next
+All 8 phases done, deployed to production at **https://vyay-five.vercel.app**,
+and the full smoke-test checklist is closed out (one item — cron with the
+real secret — deferred to its natural first scheduled run, not a blocker).
+Two real production bugs were found and fixed during live testing that no
+amount of automated gates would have caught (the sync `maxDuration` timeout,
+and the BOM-in-piped-env-vars issue); one apparent bug (Apple Shortcut) was
+fully diagnosed and turned out to require zero code changes.
 
-- Verify items 3 and 4 above are actually resolved in production.
-- Finish the smoke-test checklist (tenant isolation between two real
-  accounts, cron with the real secret, Excel export, contacts import,
-  re-parse) — first-login testing already exercised sign-in and Gmail
-  connect, which is most of it.
-- **Still outstanding, not blocking**: the stray pre-migration auto-deployment
-  mentioned at the very top of this doc (from before any migration work
-  started) — worth a quick look in the Vercel dashboard to confirm it's
-  just an old failed/superseded deployment, not something needing cleanup.
-- **Operational lesson for any future production env var changes**: never
-  pipe a value through PowerShell's own pipeline into an external
-  process's stdin on Windows — use the `$env:VAR` + `cmd /c "echo %VAR%|
-  ..."` pattern instead, and always re-run `vercel env ls` afterward to
-  confirm the write actually landed (don't trust the absence of a visible
-  error).
+**Operational lessons worth remembering for any future production work on
+this project:**
+- Never pipe a value through PowerShell's own pipeline into an external
+  process's stdin on Windows (prepends a UTF-8 BOM) — use the `$env:VAR` +
+  `cmd /c "echo %VAR%| ..."` pattern instead.
+- Always re-run `vercel env ls` after any secret-store write to confirm it
+  actually landed — don't trust the absence of a visible error.
+- Supabase's **direct connection** host is IPv6-only and unreachable from
+  Vercel's build containers — use the **session pooler** for
+  `MIGRATE_DATABASE_URL` there.
+- `waitUntil()` keeps a serverless function alive past the HTTP response,
+  but does **not** extend `maxDuration` — any loop that could plausibly run
+  long needs its own internal wall-clock budget check, not just
+  `waitUntil()`.
+
+**Deferred to a future session** (explicitly out of scope for right now,
+per user instruction): a redesign of contact-based merchant-name matching
+to use a confidence score with a review/suggestion step instead of
+directly overwriting data, plus possibly improving categorization —
+motivated by a real false-positive the user hit in production. Some
+exploratory research was done on this but is intentionally not summarized
+or acted on here; it'll be picked up fresh in a later session.
 
 ## Decisions log
 
@@ -377,11 +427,14 @@
 | Sync lock/progress | DB columns, not in-memory Maps | Maps don't survive across serverless instances |
 | Cron | Once daily, oldest-lastSyncAt-first, ~250s cutoff | Vercel Hobby limit; no user starves; initial syncs happen interactively via waitUntil |
 
-## Known bugs to fix during migration (found in planning)
+## Known bugs fixed during migration
 
-- `unseenIds()` in `src/lib/gmail/sync.ts` doesn't filter by `userId` —
-  cross-tenant dedup bug (Phase 4).
-- `POST /api/gmail/sync` fire-and-forgets `syncUser()` — dies on serverless
-  without `waitUntil()` (Phase 5).
-- `instrumentation-node.ts` setInterval loop must be gated off on Vercel
-  (Phase 5).
+- `unseenIds()` in `src/lib/gmail/sync.ts` didn't filter by `userId` —
+  cross-tenant dedup bug (fixed Phase 4).
+- `POST /api/gmail/sync` and `GET /api/gmail/callback` fire-and-forgot
+  `syncUser()` — dies on serverless without `waitUntil()` (fixed Phase 5).
+- `instrumentation-node.ts` setInterval loop now gated off on Vercel
+  (fixed Phase 5).
+- Large initial Gmail syncs got hard-killed mid-flight by Vercel's 300s
+  `maxDuration` with no graceful recovery (found + fixed post-deploy,
+  Phase 8 — see above).
