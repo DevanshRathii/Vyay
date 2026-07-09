@@ -23,19 +23,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
   const { categoryId, notes, deleted } = parsed.data;
 
-  const owned = db
-    .select({ id: transactions.id })
-    .from(transactions)
-    .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
-    .get();
+  const owned = (
+    await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
+      .limit(1)
+  )[0];
   if (!owned) return notFound("Transaction not found.");
 
   if (categoryId) {
-    const cat = db
-      .select({ id: categories.id })
-      .from(categories)
-      .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
-      .get();
+    const cat = (
+      await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
+        .limit(1)
+    )[0];
     if (!cat) return badRequest("Unknown category.");
   }
 
@@ -44,7 +48,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (notes !== undefined) update.notes = notes;
   if (deleted !== undefined) update.deletedAt = deleted ? Date.now() : null;
 
-  db.update(transactions).set(update).where(eq(transactions.id, id)).run();
+  await db.update(transactions).set(update).where(eq(transactions.id, id));
   return NextResponse.json({ ok: true });
 }
 
@@ -53,11 +57,11 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const userId = await getUserId();
   if (!userId) return unauthorized();
   const { id } = await params;
-  const res = db
+  const updated = await db
     .update(transactions)
     .set({ deletedAt: Date.now(), updatedAt: Date.now() })
     .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
-    .run();
-  if (res.changes === 0) return notFound("Transaction not found.");
+    .returning({ id: transactions.id });
+  if (updated.length === 0) return notFound("Transaction not found.");
   return NextResponse.json({ ok: true });
 }

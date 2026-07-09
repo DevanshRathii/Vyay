@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  const rows = db
+  const rows = await db
     .select({
       id: merchantRules.id,
       pattern: merchantRules.pattern,
@@ -21,8 +21,7 @@ export async function GET() {
     .from(merchantRules)
     .innerJoin(categories, eq(merchantRules.categoryId, categories.id))
     .where(eq(merchantRules.userId, userId))
-    .orderBy(desc(merchantRules.createdAt))
-    .all();
+    .orderBy(desc(merchantRules.createdAt));
   return NextResponse.json({ rows });
 }
 
@@ -40,40 +39,42 @@ export async function POST(req: Request) {
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
   const { pattern, categoryId, applyToExisting } = parsed.data;
 
-  const cat = db
-    .select()
-    .from(categories)
-    .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
-    .get();
+  const cat = (
+    await db
+      .select()
+      .from(categories)
+      .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
+      .limit(1)
+  )[0];
   if (!cat) return badRequest("Unknown category.");
 
-  const row = db
-    .insert(merchantRules)
-    .values({ userId, pattern: pattern.toLowerCase(), categoryId })
-    .returning()
-    .get();
+  const row = (
+    await db
+      .insert(merchantRules)
+      .values({ userId, pattern: pattern.toLowerCase(), categoryId })
+      .returning()
+  )[0];
 
   let applied = 0;
   if (applyToExisting) {
     const needle = pattern.toLowerCase();
-    const candidates = db
+    const all = await db
       .select()
       .from(transactions)
-      .where(and(eq(transactions.userId, userId)))
-      .all()
-      .filter(
-        (t) =>
-          !t.categoryId &&
-          !t.deletedAt &&
-          `${t.merchant ?? ""} ${t.merchantNormalized ?? ""} ${t.upiId ?? ""} ${t.emailSubject ?? ""}`
-            .toLowerCase()
-            .includes(needle),
-      );
+      .where(and(eq(transactions.userId, userId)));
+    const candidates = all.filter(
+      (t) =>
+        !t.categoryId &&
+        !t.deletedAt &&
+        `${t.merchant ?? ""} ${t.merchantNormalized ?? ""} ${t.upiId ?? ""} ${t.emailSubject ?? ""}`
+          .toLowerCase()
+          .includes(needle),
+    );
     for (const t of candidates) {
-      db.update(transactions)
+      await db
+        .update(transactions)
         .set({ categoryId, updatedAt: Date.now() })
-        .where(eq(transactions.id, t.id))
-        .run();
+        .where(eq(transactions.id, t.id));
       applied++;
     }
   }

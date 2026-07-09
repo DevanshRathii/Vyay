@@ -19,16 +19,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
   }
   const { name, email, password } = parsed.data;
-  const existing = db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
+  const existing = (
+    await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1)
+  )[0];
   if (existing) {
     return NextResponse.json({ error: "An account with this email already exists." }, { status: 409 });
   }
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = db
-    .insert(users)
-    .values({ email: email.toLowerCase(), name, passwordHash })
-    .returning()
-    .get();
-  ensureDefaultCategories(user.id);
+  const user = (
+    await db.insert(users).values({ email: email.toLowerCase(), name, passwordHash }).returning()
+  )[0];
+  await ensureDefaultCategories(user.id);
   return NextResponse.json({ ok: true, id: user.id });
 }

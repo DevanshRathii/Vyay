@@ -24,7 +24,7 @@ export async function GET(req: Request) {
   const to = toParam !== null ? Number(toParam) : now;
   const yearAgo = now - 366 * 24 * 3600 * 1000;
 
-  const rows = db
+  const rows = await db
     .select({
       occurredAt: transactions.occurredAt,
       amountPaise: transactions.amountPaise,
@@ -42,10 +42,9 @@ export async function GET(req: Request) {
         gte(transactions.occurredAt, Math.min(from, yearAgo)),
         lte(transactions.occurredAt, to),
       ),
-    )
-    .all();
+    );
 
-  const cats = db.select().from(categories).where(eq(categories.userId, userId)).all();
+  const cats = await db.select().from(categories).where(eq(categories.userId, userId));
   const catById = new Map(cats.map((c) => [c.id, c]));
 
   const inRange = rows.filter((r) => r.occurredAt >= from && r.occurredAt <= to);

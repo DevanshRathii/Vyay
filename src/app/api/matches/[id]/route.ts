@@ -22,27 +22,31 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
 
-  const event = db
-    .select()
-    .from(shortcutEvents)
-    .where(and(eq(shortcutEvents.id, id), eq(shortcutEvents.userId, userId)))
-    .get();
+  const event = (
+    await db
+      .select()
+      .from(shortcutEvents)
+      .where(and(eq(shortcutEvents.id, id), eq(shortcutEvents.userId, userId)))
+      .limit(1)
+  )[0];
   if (!event) return notFound("Match not found.");
   if (event.status !== "pending") return badRequest("This match is already closed.");
 
   if (parsed.data.action === "dismiss") {
-    db.update(shortcutEvents).set({ status: "dismissed" }).where(eq(shortcutEvents.id, id)).run();
+    await db.update(shortcutEvents).set({ status: "dismissed" }).where(eq(shortcutEvents.id, id));
     return NextResponse.json({ ok: true });
   }
 
   if (!parsed.data.transactionId) return badRequest("transactionId is required to resolve.");
-  const txn = db
-    .select()
-    .from(transactions)
-    .where(and(eq(transactions.id, parsed.data.transactionId), eq(transactions.userId, userId)))
-    .get();
+  const txn = (
+    await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, parsed.data.transactionId), eq(transactions.userId, userId)))
+      .limit(1)
+  )[0];
   if (!txn) return notFound("Transaction not found.");
 
-  applyEventToTransaction(event, txn.id, "resolved");
+  await applyEventToTransaction(event, txn.id, "resolved");
   return NextResponse.json({ ok: true });
 }

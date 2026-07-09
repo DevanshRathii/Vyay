@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  const rows = db
+  const rows = await db
     .select({
       id: apiTokens.id,
       label: apiTokens.label,
@@ -20,8 +20,7 @@ export async function GET() {
     })
     .from(apiTokens)
     .where(eq(apiTokens.userId, userId))
-    .orderBy(desc(apiTokens.createdAt))
-    .all();
+    .orderBy(desc(apiTokens.createdAt));
   return NextResponse.json({ rows });
 }
 
@@ -35,11 +34,12 @@ export async function POST(req: Request) {
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
 
   const token = randomToken();
-  const row = db
-    .insert(apiTokens)
-    .values({ userId, label: parsed.data.label ?? "Apple Shortcut", tokenHash: sha256(token) })
-    .returning()
-    .get();
+  const row = (
+    await db
+      .insert(apiTokens)
+      .values({ userId, label: parsed.data.label ?? "Apple Shortcut", tokenHash: sha256(token) })
+      .returning()
+  )[0];
   return NextResponse.json({ id: row.id, label: row.label, token });
 }
 
@@ -48,6 +48,6 @@ export async function DELETE(req: Request) {
   if (!userId) return unauthorized();
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return badRequest("Missing token id.");
-  db.delete(apiTokens).where(and(eq(apiTokens.id, id), eq(apiTokens.userId, userId))).run();
+  await db.delete(apiTokens).where(and(eq(apiTokens.id, id), eq(apiTokens.userId, userId)));
   return NextResponse.json({ ok: true });
 }

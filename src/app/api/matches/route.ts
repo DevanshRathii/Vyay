@@ -11,28 +11,31 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  const events = db
+  const events = await db
     .select()
     .from(shortcutEvents)
     .where(and(eq(shortcutEvents.userId, userId), eq(shortcutEvents.status, "pending")))
-    .orderBy(desc(shortcutEvents.createdAt))
-    .all();
+    .orderBy(desc(shortcutEvents.createdAt));
 
-  const rows = events.map((e) => ({
-    ...e,
-    candidates: findCandidates(userId, {
-      amountPaise: e.amountPaise,
-      direction: e.direction,
-      at: e.createdAt,
-    }).map((t) => ({
-      id: t.id,
-      occurredAt: t.occurredAt,
-      merchant: t.merchant,
-      channel: t.channel,
-      bank: t.bank,
-      amountPaise: t.amountPaise,
-      categoryId: t.categoryId,
+  const rows = await Promise.all(
+    events.map(async (e) => ({
+      ...e,
+      candidates: (
+        await findCandidates(userId, {
+          amountPaise: e.amountPaise,
+          direction: e.direction,
+          at: e.createdAt,
+        })
+      ).map((t) => ({
+        id: t.id,
+        occurredAt: t.occurredAt,
+        merchant: t.merchant,
+        channel: t.channel,
+        bank: t.bank,
+        amountPaise: t.amountPaise,
+        categoryId: t.categoryId,
+      })),
     })),
-  }));
+  );
   return NextResponse.json({ rows });
 }

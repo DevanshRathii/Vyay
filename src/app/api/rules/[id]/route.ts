@@ -10,10 +10,10 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const userId = await getUserId();
   if (!userId) return unauthorized();
   const { id } = await params;
-  const res = db
+  const deleted = await db
     .delete(merchantRules)
     .where(and(eq(merchantRules.id, id), eq(merchantRules.userId, userId)))
-    .run();
-  if (res.changes === 0) return notFound("Rule not found.");
+    .returning({ id: merchantRules.id });
+  if (deleted.length === 0) return notFound("Rule not found.");
   return NextResponse.json({ ok: true });
 }

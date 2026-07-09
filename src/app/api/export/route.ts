@@ -17,7 +17,7 @@ export async function GET(req: Request) {
   const params = new URL(req.url).searchParams;
   const conds = buildTransactionFilters(userId, params);
 
-  const rows = db
+  const rows = await db
     .select({
       occurredAt: transactions.occurredAt,
       channel: transactions.channel,
@@ -31,8 +31,7 @@ export async function GET(req: Request) {
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .where(and(...conds))
-    .orderBy(desc(transactions.occurredAt))
-    .all();
+    .orderBy(desc(transactions.occurredAt));
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Vyay";

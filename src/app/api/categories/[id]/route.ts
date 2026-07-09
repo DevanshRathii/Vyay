@@ -19,12 +19,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
 
-  const res = db
+  const updated = await db
     .update(categories)
     .set(parsed.data)
     .where(and(eq(categories.id, id), eq(categories.userId, userId)))
-    .run();
-  if (res.changes === 0) return notFound("Category not found.");
+    .returning({ id: categories.id });
+  if (updated.length === 0) return notFound("Category not found.");
   return NextResponse.json({ ok: true });
 }
 
@@ -34,15 +34,17 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!userId) return unauthorized();
   const { id } = await params;
 
-  const owned = db
-    .select({ id: categories.id })
-    .from(categories)
-    .where(and(eq(categories.id, id), eq(categories.userId, userId)))
-    .get();
+  const owned = (
+    await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(eq(categories.id, id), eq(categories.userId, userId)))
+      .limit(1)
+  )[0];
   if (!owned) return notFound("Category not found.");
 
-  db.update(transactions).set({ categoryId: null }).where(eq(transactions.categoryId, id)).run();
-  db.delete(merchantRules).where(eq(merchantRules.categoryId, id)).run();
-  db.delete(categories).where(eq(categories.id, id)).run();
+  await db.update(transactions).set({ categoryId: null }).where(eq(transactions.categoryId, id));
+  await db.delete(merchantRules).where(eq(merchantRules.categoryId, id));
+  await db.delete(categories).where(eq(categories.id, id));
   return NextResponse.json({ ok: true });
 }

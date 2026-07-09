@@ -28,7 +28,7 @@ export async function GET(req: Request) {
   const pageSize = Math.min(200, Math.max(1, Number(params.get("pageSize") ?? 50)));
 
   const where = and(...conds);
-  const rows = db
+  const rows = await db
     .select({
       id: transactions.id,
       occurredAt: transactions.occurredAt,
@@ -56,10 +56,9 @@ export async function GET(req: Request) {
     .where(where)
     .orderBy(sortDir(sortCol), desc(transactions.createdAt))
     .limit(pageSize)
-    .offset((page - 1) * pageSize)
-    .all();
+    .offset((page - 1) * pageSize);
 
-  const total = db.select({ n: count() }).from(transactions).where(where).get()?.n ?? 0;
+  const total = (await db.select({ n: count() }).from(transactions).where(where))[0]?.n ?? 0;
 
   return NextResponse.json({ rows, total, page, pageSize });
 }

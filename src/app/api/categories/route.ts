@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  const rows = db
+  const rows = await db
     .select({
       id: categories.id,
       name: categories.name,
@@ -21,8 +21,7 @@ export async function GET() {
     .leftJoin(transactions, eq(transactions.categoryId, categories.id))
     .where(eq(categories.userId, userId))
     .groupBy(categories.id)
-    .orderBy(asc(categories.name))
-    .all();
+    .orderBy(asc(categories.name));
   return NextResponse.json({ rows });
 }
 
@@ -37,18 +36,15 @@ export async function POST(req: Request) {
   const parsed = createSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
 
-  const exists = db
-    .select()
-    .from(categories)
-    .where(eq(categories.userId, userId))
-    .all()
-    .some((c) => c.name.toLowerCase() === parsed.data.name.toLowerCase());
+  const existing = await db.select().from(categories).where(eq(categories.userId, userId));
+  const exists = existing.some((c) => c.name.toLowerCase() === parsed.data.name.toLowerCase());
   if (exists) return badRequest("A category with this name already exists.");
 
-  const row = db
-    .insert(categories)
-    .values({ userId, name: parsed.data.name, color: parsed.data.color ?? "#8e8e93" })
-    .returning()
-    .get();
+  const row = (
+    await db
+      .insert(categories)
+      .values({ userId, name: parsed.data.name, color: parsed.data.color ?? "#8e8e93" })
+      .returning()
+  )[0];
   return NextResponse.json({ row });
 }

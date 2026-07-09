@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  const rows = db.select().from(contacts).where(eq(contacts.userId, userId)).orderBy(asc(contacts.name)).all();
+  const rows = await db.select().from(contacts).where(eq(contacts.userId, userId)).orderBy(asc(contacts.name));
   return NextResponse.json({
     rows: rows.map((c) => ({
       id: c.id,

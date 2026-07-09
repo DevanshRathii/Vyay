@@ -11,7 +11,10 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!userId) return unauthorized();
   const { id } = await params;
 
-  const res = db.delete(contacts).where(and(eq(contacts.id, id), eq(contacts.userId, userId))).run();
-  if (res.changes === 0) return notFound("Contact not found.");
+  const deleted = await db
+    .delete(contacts)
+    .where(and(eq(contacts.id, id), eq(contacts.userId, userId)))
+    .returning({ id: contacts.id });
+  if (deleted.length === 0) return notFound("Contact not found.");
   return NextResponse.json({ ok: true });
 }

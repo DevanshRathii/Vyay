@@ -31,11 +31,13 @@ export async function POST(req: Request) {
   if (!token) {
     return NextResponse.json({ error: "Missing Authorization: Bearer token." }, { status: 401 });
   }
-  const tokenRow = db.select().from(apiTokens).where(eq(apiTokens.tokenHash, sha256(token))).get();
+  const tokenRow = (
+    await db.select().from(apiTokens).where(eq(apiTokens.tokenHash, sha256(token))).limit(1)
+  )[0];
   if (!tokenRow) {
     return NextResponse.json({ error: "Invalid token." }, { status: 401 });
   }
-  db.update(apiTokens).set({ lastUsedAt: Date.now() }).where(eq(apiTokens.id, tokenRow.id)).run();
+  await db.update(apiTokens).set({ lastUsedAt: Date.now() }).where(eq(apiTokens.id, tokenRow.id));
   const userId = tokenRow.userId;
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
@@ -47,33 +49,30 @@ export async function POST(req: Request) {
   const at = timestamp ? Date.parse(timestamp) : Date.now();
 
   // Resolve or create the category by name (case-insensitive).
-  let cat = db
-    .select()
-    .from(categories)
-    .where(eq(categories.userId, userId))
-    .all()
-    .find((c) => c.name.toLowerCase() === category.toLowerCase());
+  const cats = await db.select().from(categories).where(eq(categories.userId, userId));
+  let cat = cats.find((c) => c.name.toLowerCase() === category.toLowerCase());
   if (!cat) {
-    cat = db.insert(categories).values({ userId, name: category }).returning().get();
+    cat = (await db.insert(categories).values({ userId, name: category }).returning())[0];
   }
 
-  const event = db
-    .insert(shortcutEvents)
-    .values({
-      userId,
-      amountPaise,
-      direction,
-      categoryId: cat.id,
-      categoryName: cat.name,
-      notes: notes ?? null,
-    })
-    .returning()
-    .get();
+  const event = (
+    await db
+      .insert(shortcutEvents)
+      .values({
+        userId,
+        amountPaise,
+        direction,
+        categoryId: cat.id,
+        categoryName: cat.name,
+        notes: notes ?? null,
+      })
+      .returning()
+  )[0];
 
-  const candidates = findCandidates(userId, { amountPaise, direction, at });
+  const candidates = await findCandidates(userId, { amountPaise, direction, at });
 
   if (candidates.length === 1) {
-    applyEventToTransaction(event, candidates[0].id, "matched");
+    await applyEventToTransaction(event, candidates[0].id, "matched");
     return NextResponse.json({
       status: "matched",
       message: `Categorized ${cat.name}: ${candidates[0].merchant ?? "transaction"}.`,
