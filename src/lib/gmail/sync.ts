@@ -24,6 +24,15 @@ export class SyncInProgressError extends Error {}
 // serverless invocation and can be reclaimed by a fresh sync.
 const STALE_SYNC_MS = 10 * 60 * 1000;
 
+// A single sync invocation stops cleanly at this point, leaving headroom
+// under Vercel's 300s maxDuration. Without this, a large initial sync (many
+// hundreds of messages) gets hard-killed mid-flight by the platform: no
+// graceful error, no completion, syncStatus stuck at "syncing" until the
+// staleness window passes. Stopping early is safe — ingestion is idempotent
+// (unique (userId, gmailMessageId) index), so unprocessed ids are simply
+// picked up by the next sync attempt via unseenIds() filtering.
+const SYNC_TIME_BUDGET_MS = 250_000;
+
 // Progress writes are throttled (by item count) to avoid one DB round trip
 // per ingested message across a 3000-message initial sync.
 const PROGRESS_WRITE_EVERY = 20;
@@ -99,14 +108,23 @@ async function fetchAndIngest(
   gmail: gmail_v1.Gmail,
   conn: GmailConnection,
   ids: string[],
-): Promise<{ inserted: number; skipped: number }> {
+  deadline: number,
+): Promise<{ inserted: number; skipped: number; complete: boolean }> {
   const ctx = await loadCategorizerContext(conn.userId);
   const contactCtx = await loadContactContext(conn.userId);
   let inserted = 0;
   let skipped = 0;
   let processed = 0;
+  let complete = true;
   await setProgress(conn.id, "ingesting", 0, ids.length);
   await mapLimit(ids, CONCURRENCY, async (id) => {
+    if (Date.now() > deadline) {
+      // Out of time for this invocation. Leave this message for the next
+      // sync attempt — it was never inserted, so unseenIds() will surface
+      // it again; nothing needs undoing.
+      complete = false;
+      return;
+    }
     const res = await withRetry(() => gmail.users.messages.get({ userId: "me", id, format: "full" }));
     const email = toEmailMessage(res.data);
     const outcome = await ingestEmail(conn.userId, email, ctx, contactCtx);
@@ -115,12 +133,13 @@ async function fetchAndIngest(
     processed++;
     if (shouldWriteProgress(processed, ids.length)) await setProgress(conn.id, "ingesting", processed, ids.length);
   });
-  return { inserted, skipped };
+  return { inserted, skipped, complete };
 }
 
 async function fullSync(
   gmail: gmail_v1.Gmail,
   conn: GmailConnection,
+  deadline: number,
   opts: { afterUnixSec?: number } = {},
 ): Promise<SyncSummary> {
   // Capture the history checkpoint BEFORE listing, so nothing arriving during
@@ -132,8 +151,13 @@ async function fullSync(
   const maxTotal = Number(process.env.SYNC_MAX_INITIAL_MESSAGES ?? 3000);
   const ids: string[] = [];
   let pageToken: string | undefined;
+  let listTimedOut = false;
   await setProgress(conn.id, "listing", 0, 0);
   do {
+    if (Date.now() > deadline) {
+      listTimedOut = true;
+      break;
+    }
     const res = await withRetry(() =>
       gmail.users.messages.list({ userId: "me", q, maxResults: 100, pageToken }),
     );
@@ -143,14 +167,19 @@ async function fullSync(
   } while (pageToken && ids.length < maxTotal);
 
   const fresh = await unseenIds(conn.userId, ids.slice(0, maxTotal));
-  const { inserted, skipped } = await fetchAndIngest(gmail, conn, fresh);
+  const { inserted, skipped, complete: ingestComplete } = await fetchAndIngest(gmail, conn, fresh, deadline);
+  // Hitting maxTotal is an intentional cap, not a time-out — only a genuine
+  // deadline hit (listing or ingesting) should keep initialSyncDone false so
+  // the next sync attempt tries fullSync again instead of switching to
+  // incremental-only coverage.
+  const complete = !listTimedOut && ingestComplete;
 
   await db
     .update(gmailConnections)
     .set({
       historyId: newHistoryId,
       lastSyncAt: Date.now(),
-      initialSyncDone: true,
+      initialSyncDone: complete,
       totalSynced: (conn.totalSynced ?? 0) + inserted,
     })
     .where(eq(gmailConnections.id, conn.id));
@@ -158,7 +187,7 @@ async function fullSync(
   return { fetched: fresh.length, inserted, skipped, mode: opts.afterUnixSec ? "fallback" : "initial" };
 }
 
-async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Promise<SyncSummary> {
+async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection, deadline: number): Promise<SyncSummary> {
   const ids: string[] = [];
   let pageToken: string | undefined;
   let latestHistoryId: string | null = conn.historyId;
@@ -166,6 +195,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
   await setProgress(conn.id, "listing", 0, 0);
   try {
     do {
+      if (Date.now() > deadline) break; // resume from latestHistoryId next time
       const res = await withRetry(() =>
         gmail.users.history.list({
           userId: "me",
@@ -190,7 +220,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
     if (status === 404) {
       // historyId expired — fall back to a query sync from the last checkpoint.
       const afterSec = Math.floor(((conn.lastSyncAt ?? Date.now()) - 24 * 3600 * 1000) / 1000);
-      return fullSync(gmail, conn, { afterUnixSec: afterSec });
+      return fullSync(gmail, conn, deadline, { afterUnixSec: afterSec });
     }
     throw err;
   }
@@ -203,6 +233,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
   let filtered = 0;
   await setProgress(conn.id, "listing", 0, fresh.length);
   await mapLimit(fresh, CONCURRENCY, async (id) => {
+    if (Date.now() > deadline) return; // still in `fresh` — picked up again next time
     const res = await withRetry(() =>
       gmail.users.messages.get({
         userId: "me",
@@ -217,7 +248,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
     if (shouldWriteProgress(filtered, fresh.length)) await setProgress(conn.id, "listing", filtered, fresh.length);
   });
 
-  const { inserted, skipped } = await fetchAndIngest(gmail, conn, relevant);
+  const { inserted, skipped } = await fetchAndIngest(gmail, conn, relevant, deadline);
 
   await db
     .update(gmailConnections)
@@ -270,12 +301,13 @@ export async function syncUser(userId: string, opts: { full?: boolean } = {}): P
     throw new SyncInProgressError("A sync is already in progress for this account.");
   }
 
+  const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
   try {
     const gmail = gmailFor(acquired);
     const summary =
       !acquired.historyId || !acquired.initialSyncDone || opts.full
-        ? await fullSync(gmail, acquired)
-        : await incrementalSync(gmail, acquired);
+        ? await fullSync(gmail, acquired, deadline)
+        : await incrementalSync(gmail, acquired, deadline);
     await db
       .update(gmailConnections)
       .set({ syncStatus: "idle", syncStartedAt: null })

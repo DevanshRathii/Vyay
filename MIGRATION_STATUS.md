@@ -231,35 +231,137 @@
   - Green gates all pass: typecheck clean; `npm run test` — 72/72; lint
     clean.
 
+- **Phase 8 (in progress).** `CLAUDE.md` rewritten for the current
+  architecture (Postgres/multi-tenant/Vercel, async DB, Google-only auth,
+  DB-backed sync lock/progress, cron). Git auto-deploy reconnected and
+  proven working (a routine push auto-deployed successfully).
+
+  **Real production bugs found during first-login testing** (this is
+  exactly what the smoke-test checklist is for — these would not have
+  surfaced from any of the automated gates):
+
+  1. **BOM corruption in every env var set via a PowerShell-piped
+     `vercel env add`.** Windows PowerShell 5.1 prepends a UTF-8 BOM when
+     piping a string directly into an external process's stdin — a known
+     PS 5.1 quirk. First symptom: Google's OAuth screen showed
+     `Error 401: invalid_client` / "The OAuth client was not found" on
+     sign-in. Diagnosed by having the user paste the actual failed
+     `accounts.google.com` error URL and reading the `client_id` query
+     param — it was `%EF%BB%BF877063526258-...` (the BOM, URL-encoded).
+     The client ID text itself was correct; an invisible character in
+     front of it made it a different string as far as Google's exact-match
+     lookup was concerned.
+     - **Fix**: re-set every affected var via a `cmd.exe`-piped `echo`
+       instead of PowerShell's own pipe (`cmd /c "echo %VAR%| vercel env
+       add NAME production"`, with the value staged into a `$env:` var
+       first so it's never retyped or exposed) — this sidesteps
+       PowerShell's stdin-encoding path entirely. Confirmed the fix by
+       inspecting a subsequent OAuth error URL and seeing a clean
+       `client_id` with no BOM.
+     - **Every var originally set this way needed re-doing**:
+       `GOOGLE_CLIENT_ID`, `SYNC_INTERVAL_MINUTES`, `APP_URL` (agent-set,
+       re-set by agent after explicit user confirmation — these are
+       production-secret-store writes, which the permission system
+       correctly gated on user approval even though the agent had set the
+       originals); `GOOGLE_CLIENT_SECRET`, `ENCRYPTION_KEY`, `AUTH_SECRET`,
+       `CRON_SECRET` (user re-set in their own terminal — genuine secrets).
+       `ENCRYPTION_KEY`/`AUTH_SECRET`/`CRON_SECRET` were regenerated fresh
+       rather than reusing the (possibly corrupted, unverifiable-by-us)
+       originals — safe, since nothing in production had been
+       encrypted/signed with them yet. `MIGRATE_DATABASE_URL` did NOT need
+       redoing — a corrupted connection string would have failed to parse,
+       and the migration had already succeeded twice, which is direct
+       proof it was clean.
+     - **`DATABASE_URL` re-add briefly failed silently** during the fix —
+       the `rm` succeeded but a multi-line pasted follow-up didn't
+       re-`add` it (almost certainly the interactive CLI swallowing a
+       pasted line as if it were answering a prompt). Caught by routinely
+       re-running `vercel env ls` after every remediation step, which is
+       now a standing practice: **verify by listing names/timestamps after
+       any secret-store write, don't assume a command succeeded from its
+       absence of an error.** Fixed by having the user re-run the two
+       remaining steps one at a time with explicit output checks between
+       them, rather than as a pasted block.
+  2. **`redirect_uri_mismatch`** — straightforward: the production
+     redirect URIs hadn't actually been added to the Google Cloud OAuth
+     client yet (Phase 8's own Google Console step, not yet done when
+     first login was attempted). Fixed by the user adding both
+     `https://vyay-five.vercel.app/api/auth/callback/google` and
+     `https://vyay-five.vercel.app/api/gmail/callback` in Google Cloud
+     Console → Credentials.
+  3. **Real bug: large initial Gmail syncs get hard-killed mid-flight by
+     Vercel's 300s `maxDuration`, leaving the account stuck in
+     `syncStatus: "syncing"` forever (until the 10-min staleness window).**
+     Found via direct (user-approved) read-only query against
+     `gmail_connections` for the affected account: `sync_status: "syncing"`,
+     18.8 minutes elapsed, `sync_progress_done: 440` of `1401`,
+     `sync_error: null` (null because the process was hard-killed by the
+     platform, never reached the code that would have written a graceful
+     error). `waitUntil()` (added in Phase 5) keeps the function alive
+     past the HTTP response returning, but does **not** extend
+     `maxDuration` — this is a real gap Phase 5's design didn't cover:
+     the cron sweep already had a clean 250s cutoff *between users*, but a
+     single user's initial sync had no cutoff *within* itself.
+     - **Fix**: added a `SYNC_TIME_BUDGET_MS = 250_000` wall-clock budget
+       checked inside `fetchAndIngest`'s per-message loop and both
+       `fullSync`/`incrementalSync`'s listing loops
+       (`src/lib/gmail/sync.ts`). Past the deadline, remaining work is
+       skipped (not attempted, not counted as inserted/skipped) rather
+       than erroring — this is safe because ingestion is idempotent
+       (unique `(userId, gmailMessageId)` index) and `unseenIds()` will
+       naturally re-surface anything not yet inserted on the next attempt.
+       `fullSync` now only sets `initialSyncDone: true` when genuinely
+       complete (not merely hitting the intentional `SYNC_MAX_INITIAL_MESSAGES`
+       cap, which still counts as "done" like before — only an actual
+       deadline hit keeps it `false`), so a timed-out sync correctly
+       retries via `fullSync` again next time rather than switching to
+       incremental-only coverage. `syncUser()` computes one deadline up
+       front and threads it through. Net effect: a big backlog now
+       completes over a few "Sync now" clicks (or daily cron runs)
+       instead of wedging indefinitely on the first one. typecheck/test
+       (72/72)/lint all green; **not yet deployed** — see below.
+  4. **Apple Shortcut "network connection lost"** — investigated via
+     `vercel logs` and found **zero requests ever reached the server**
+     for the real POST attempt, ruling out a server-side bug; a follow-up
+     GET-in-Safari test to the same URL *did* reach the server (405, as
+     expected for a POST-only route — confirms DNS/TLS/routing are fine).
+     Likely a transient client-side issue (possibly coinciding with the
+     env-var/redeploy churn happening at the same time) or a Shortcuts-app
+     configuration detail we haven't pinned down yet. **Unresolved** —
+     user asked to retry now that the domain is confirmed reachable; if it
+     still fails, need the exact Shortcut action configuration to debug
+     further. Not a migration-created bug as far as we can tell (the route
+     itself is unchanged since Phase 3's async conversion and has always
+     behaved this way in principle).
+
 ## In progress
 
-- Nothing mid-flight. **Production is live and smoke-checked.** Repo fully
-  green.
+- **The sync-timeout fix (item 3 above) is committed locally but not yet
+  deployed or verified in production.** Next action: commit, push (auto-deploy
+  will pick it up), then have the user click "Sync now" again on the
+  account that's stuck at 440/1401 — the >10-minute-stale lock will be
+  reclaimed automatically, and this time it should stop cleanly under
+  budget instead of wedging again if it doesn't finish in one pass.
+- Item 4 (Apple Shortcut) is unresolved, waiting on the user's retry / more
+  detail if it fails again.
 
 ## Next
 
-- **Phase 8 — Handover** (`MIGRATION_PLAN.md` §Phase 8): rewrite
-  `CLAUDE.md` for the current architecture (see the stale-points list
-  above); write the exact manual Google Cloud Console steps for the user
-  (add the two production redirect URIs, add test users, note the 7-day
-  test-mode token expiry trade-off — README's Troubleshooting section
-  already covers the user-facing version of this, Phase 8 should point
-  there rather than duplicate it); write a smoke-test checklist covering
-  what a real signed-in user flow needs (Google sign-in as a *second*
-  test account, not just the unauthenticated checks already done — Gmail
-  connect + consent screen scope display, initial sync populating the
-  ledger, tenant isolation between two real accounts, manual "Sync now",
-  cron route 401-without-secret/200-with-secret, Excel export, Apple
-  Shortcut token + log, contacts import, re-parse).
+- Verify items 3 and 4 above are actually resolved in production.
+- Finish the smoke-test checklist (tenant isolation between two real
+  accounts, cron with the real secret, Excel export, contacts import,
+  re-parse) — first-login testing already exercised sign-in and Gmail
+  connect, which is most of it.
 - **Still outstanding, not blocking**: the stray pre-migration auto-deployment
   mentioned at the very top of this doc (from before any migration work
-  started) — worth a quick look in the Vercel dashboard during Phase 8 to
-  confirm it's just an old failed/superseded deployment, not something
-  needing cleanup.
-- **Vercel Git auto-deploy is DISCONNECTED** (`vercel git disconnect`,
-  2026-07-09) — every mid-migration push was triggering a doomed production
-  build + failure email. **Phase 7 must run `vercel git connect` after the
-  first successful manual deploy.**
+  started) — worth a quick look in the Vercel dashboard to confirm it's
+  just an old failed/superseded deployment, not something needing cleanup.
+- **Operational lesson for any future production env var changes**: never
+  pipe a value through PowerShell's own pipeline into an external
+  process's stdin on Windows — use the `$env:VAR` + `cmd /c "echo %VAR%|
+  ..."` pattern instead, and always re-run `vercel env ls` afterward to
+  confirm the write actually landed (don't trust the absence of a visible
+  error).
 
 ## Decisions log
 
