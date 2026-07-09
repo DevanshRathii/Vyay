@@ -3,8 +3,10 @@ import type { Config } from "drizzle-kit";
 export default {
   schema: "./src/lib/db/schema.ts",
   out: "./drizzle",
-  dialect: "sqlite",
+  dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_PATH ?? "./data/vyay.db",
+    // Direct (non-pooled) connection — migrations must not go through the
+    // transaction pooler.
+    url: process.env.MIGRATE_DATABASE_URL ?? "",
   },
 } satisfies Config;

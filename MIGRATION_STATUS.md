@@ -21,18 +21,38 @@
     `MIGRATE_DATABASE_URL` (direct, port 5432) to local `.env`, copied from
     dashboard → Connect. Direct host: `db.llciwbpnlmlroromfdoc.supabase.co`.
 
+- **Phase 2**: complete. schema.ts on pg-core (epoch-ms as
+  `bigint mode:"number"`, `initialSyncDone` boolean, `confidence`
+  doublePrecision, `amountPaise` bigint for large transfers);
+  drizzle.config → postgresql (`MIGRATE_DATABASE_URL`); fresh pg migration
+  `drizzle/0000_overrated_captain_flint.sql` (sqlite migrations deleted, in
+  git history); `db/index.ts` on postgres.js (`max:1, prepare:false` —
+  pooler requirement); standalone `migrate.ts` (tsx + process.loadEnvFile,
+  direct connection); PGlite test harness (`tests/helpers/pglite.ts`) and
+  all 4 DB-backed test files converted to async/await; deps swapped
+  (better-sqlite3 removed; postgres, @vercel/functions, @electric-sql/pglite
+  added); `.env.example` updated (DATABASE_URL/MIGRATE_DATABASE_URL/
+  CRON_SECRET; DATABASE_PATH gone).
+  - **Plan correction (honest state):** whole-program typecheck is RED and
+    stays red until Phase 3 finishes — the 81 legacy `.get()/.all()/.run()`
+    call sites don't exist on pg query types. This was foreseen but
+    mis-stated in the plan ("typecheck as Phase 2 gate"); real gates were:
+    schema compiles in isolation, migration generates, deps install.
+
 ## In progress
 
-- Nothing mid-flight. Repo is green: 68/68 vitest, typecheck + lint clean,
-  still fully on SQLite (no conversion code written yet).
+- Nothing mid-flight, but **the repo does not typecheck** until Phase 3
+  batches land (expected, tracked, next up).
 
 ## Next
 
-- **Phase 2 — Postgres schema + driver + test harness** (`MIGRATION_PLAN.md`
-  §Phase 2): schema.ts → pg-core, drizzle.config dialect, regenerate
-  migrations, postgres.js driver (max:1, prepare:false), migrate.ts, PGlite
-  test harness, dependency swaps, .env.example. Gate: typecheck (vitest goes
-  green after Phase 3).
+- **Phase 3 — async conversion** (`MIGRATION_PLAN.md` §Phase 3), batches:
+  A core lib (categorize, match, ingest, contacts/*, reparse) →
+  B gmail path (sync, client, gmail routes) →
+  C remaining API routes →
+  D auth.ts + seed.ts.
+  Gate per batch: shrinking `\.(get|all|run)\(\)` grep count; final gate:
+  typecheck + vitest + lint all green, then commit per batch.
 
 ## Decisions log
 

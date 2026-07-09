@@ -1,28 +1,21 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import fs from "fs";
-import path from "path";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "./schema";
 
 function createDb() {
-  const dbPath = process.env.DATABASE_PATH ?? "./data/vyay.db";
-  const resolved = path.resolve(process.cwd(), dbPath);
-  fs.mkdirSync(path.dirname(resolved), { recursive: true });
-  const sqlite = new Database(resolved);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-  const database = drizzle(sqlite, { schema });
-  // Apply pending migrations automatically so self-hosters never need to
-  // remember a separate migrate step.
-  const migrationsFolder = path.resolve(process.cwd(), "drizzle");
-  if (fs.existsSync(migrationsFolder)) {
-    migrate(database, { migrationsFolder });
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error("DATABASE_URL is not set (Supabase transaction-pooler connection string).");
   }
-  return database;
+  // max: 1 — serverless: one connection per function instance.
+  // prepare: false — required: Supabase's transaction-mode pooler (Supavisor,
+  // port 6543) does not support prepared statements.
+  const client = postgres(url, { max: 1, prepare: false });
+  return drizzle(client, { schema });
 }
 
-// Cache across HMR reloads in dev.
+// Cache across HMR reloads in dev. Migrations are applied at build/deploy
+// time via `tsx migrate.ts`, not at boot.
 const globalForDb = globalThis as unknown as { __vyayDb?: ReturnType<typeof createDb> };
 export const db = globalForDb.__vyayDb ?? createDb();
 if (process.env.NODE_ENV !== "production") globalForDb.__vyayDb = db;

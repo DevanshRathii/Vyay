@@ -1,26 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1783396503093,
-      "tag": "0000_peaceful_taskmaster",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1783487479141,
-      "tag": "0001_yummy_iron_monger",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1783488491331,
-      "tag": "0002_jittery_thor",
+      "version": "7",
+      "when": 1783606389430,
+      "tag": "0000_overrated_captain_flint",
       "breakpoints": true
     }
   ]

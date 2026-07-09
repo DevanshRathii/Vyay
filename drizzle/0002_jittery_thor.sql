@@ -1,1 +1,0 @@
-ALTER TABLE `contacts` ADD `emails` text DEFAULT '[]' NOT NULL;

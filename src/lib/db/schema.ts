@@ -1,4 +1,13 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  bigint,
+  boolean,
+  doublePrecision,
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { randomUUID } from "crypto";
 
 const id = () =>
@@ -6,22 +15,25 @@ const id = () =>
     .primaryKey()
     .$defaultFn(() => randomUUID());
 
+/** Epoch milliseconds. Deliberately bigint-as-number, not a native timestamp. */
+const epochMs = (name: string) => bigint(name, { mode: "number" });
+
 const now = () =>
-  integer("created_at")
+  epochMs("created_at")
     .notNull()
     .$defaultFn(() => Date.now());
 
-export const users = sqliteTable("users", {
+export const users = pgTable("users", {
   id: id(),
   email: text("email").notNull().unique(),
   name: text("name"),
   image: text("image"),
-  /** bcrypt hash; null for Google-only accounts */
+  /** bcrypt hash; unused since the move to Google-only sign-in */
   passwordHash: text("password_hash"),
   createdAt: now(),
 });
 
-export const gmailConnections = sqliteTable("gmail_connections", {
+export const gmailConnections = pgTable("gmail_connections", {
   id: id(),
   userId: text("user_id")
     .notNull()
@@ -32,11 +44,11 @@ export const gmailConnections = sqliteTable("gmail_connections", {
   accessToken: text("access_token").notNull(),
   /** AES-256-GCM encrypted */
   refreshToken: text("refresh_token").notNull(),
-  expiryDate: integer("expiry_date"),
+  expiryDate: epochMs("expiry_date"),
   /** Gmail historyId checkpoint for incremental sync */
   historyId: text("history_id"),
-  lastSyncAt: integer("last_sync_at"),
-  initialSyncDone: integer("initial_sync_done").notNull().default(0),
+  lastSyncAt: epochMs("last_sync_at"),
+  initialSyncDone: boolean("initial_sync_done").notNull().default(false),
   syncStatus: text("sync_status").notNull().default("idle"), // idle | syncing | error
   syncError: text("sync_error"),
   /** running counters for the settings page */
@@ -44,7 +56,7 @@ export const gmailConnections = sqliteTable("gmail_connections", {
   createdAt: now(),
 });
 
-export const categories = sqliteTable(
+export const categories = pgTable(
   "categories",
   {
     id: id(),
@@ -58,7 +70,7 @@ export const categories = sqliteTable(
   (t) => [uniqueIndex("categories_user_name_idx").on(t.userId, t.name)],
 );
 
-export const transactions = sqliteTable(
+export const transactions = pgTable(
   "transactions",
   {
     id: id(),
@@ -69,9 +81,9 @@ export const transactions = sqliteTable(
     gmailMessageId: text("gmail_message_id"),
     source: text("source").notNull().default("gmail"), // gmail | manual | seed
     /** transaction time, ms epoch */
-    occurredAt: integer("occurred_at").notNull(),
-    /** stored in paise to avoid floating point issues */
-    amountPaise: integer("amount_paise").notNull(),
+    occurredAt: epochMs("occurred_at").notNull(),
+    /** stored in paise to avoid floating point issues; bigint so very large transfers fit */
+    amountPaise: bigint("amount_paise", { mode: "number" }).notNull(),
     currency: text("currency").notNull().default("INR"),
     direction: text("direction").notNull(), // debit | credit
     merchant: text("merchant"),
@@ -82,16 +94,16 @@ export const transactions = sqliteTable(
     upiId: text("upi_id"),
     cardLast4: text("card_last4"),
     emailSubject: text("email_subject"),
-    confidence: real("confidence"),
+    confidence: doublePrecision("confidence"),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
     notes: text("notes"),
     /** original parse payload, JSON — kept for future re-parsing */
     raw: text("raw"),
     /** id of the transaction this one appears to duplicate */
     duplicateOfId: text("duplicate_of_id"),
-    deletedAt: integer("deleted_at"),
+    deletedAt: epochMs("deleted_at"),
     createdAt: now(),
-    updatedAt: integer("updated_at")
+    updatedAt: epochMs("updated_at")
       .notNull()
       .$defaultFn(() => Date.now()),
   },
@@ -103,7 +115,7 @@ export const transactions = sqliteTable(
   ],
 );
 
-export const merchantRules = sqliteTable(
+export const merchantRules = pgTable(
   "merchant_rules",
   {
     id: id(),
@@ -120,7 +132,7 @@ export const merchantRules = sqliteTable(
   (t) => [index("rules_user_idx").on(t.userId)],
 );
 
-export const contacts = sqliteTable(
+export const contacts = pgTable(
   "contacts",
   {
     id: id(),
@@ -143,7 +155,7 @@ export const contacts = sqliteTable(
   ],
 );
 
-export const apiTokens = sqliteTable(
+export const apiTokens = pgTable(
   "api_tokens",
   {
     id: id(),
@@ -153,20 +165,20 @@ export const apiTokens = sqliteTable(
     label: text("label").notNull().default("Apple Shortcut"),
     /** sha256 hex of the token — plaintext is shown once and never stored */
     tokenHash: text("token_hash").notNull().unique(),
-    lastUsedAt: integer("last_used_at"),
+    lastUsedAt: epochMs("last_used_at"),
     createdAt: now(),
   },
   (t) => [index("tokens_user_idx").on(t.userId)],
 );
 
-export const shortcutEvents = sqliteTable(
+export const shortcutEvents = pgTable(
   "shortcut_events",
   {
     id: id(),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    amountPaise: integer("amount_paise").notNull(),
+    amountPaise: bigint("amount_paise", { mode: "number" }).notNull(),
     direction: text("direction").notNull().default("debit"),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
     categoryName: text("category_name").notNull(),
