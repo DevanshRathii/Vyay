@@ -12,3 +12,6 @@ data/*.db-shm
 coverage/
 .claude/settings.local.json
 *.tsbuildinfo
+
+.vercel
+.env*
