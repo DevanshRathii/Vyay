@@ -53,23 +53,65 @@
     68/68 passing on the first-ever PGlite run, no driver quirks, no fixes
     needed in `tests/helpers/pglite.ts`; `npm run lint` clean.
 
+- **Phase 4: complete.** Google-only auth: `src/auth.ts` no longer imports
+  `Credentials`/`bcryptjs`/zod-schema — only the Google-upsert `jwt`
+  callback remains; `src/app/register/` (page) and
+  `src/app/api/register/route.ts` deleted entirely;
+  `src/components/auth-forms.tsx` reduced to a single Google-only
+  `LoginForm` (shows a clear "not configured" message instead of a broken
+  button if `GOOGLE_CLIENT_ID`/`SECRET` are unset — `RegisterForm` and all
+  email/password JSX removed); `users.passwordHash` dropped from
+  `schema.ts` and via new migration `drizzle/0001_nostalgic_lenny_balinger.sql`
+  (`ALTER TABLE users DROP COLUMN password_hash`); `bcryptjs` +
+  `@types/bcryptjs` removed from `package.json`; `src/lib/db/seed.ts`
+  reworked to not hash/store a password (demo user signs in with Google
+  using `demo@vyay.app`).
+  - **Fixed the known cross-tenant bug**: `unseenIds()` in
+    `src/lib/gmail/sync.ts` now filters by `eq(transactions.userId, userId)`
+    in addition to the `inArray(gmailMessageId, ...)` check (was previously
+    treating any user's stored message id as "seen" for every user).
+    Function exported (was private) so it's directly testable.
+  - **Full tenant-isolation audit** (via research subagent, all call sites
+    across `transactions`, `categories`, `merchantRules`, `contacts`,
+    `apiTokens`, `shortcutEvents`, `gmailConnections` traced): only the
+    `unseenIds()` bug found — every other query either filters directly by
+    `userId` or operates on an id pre-verified as user-owned earlier in the
+    same handler (e.g. `categories/[id]/route.ts` deletes cascade from a
+    category id checked against `userId` first). `syncAllUsers()`'s
+    unscoped `gmailConnections` select is intentional (it's the background
+    sweep iterating every account, re-scoped per-connection immediately
+    after). No other fixes needed.
+  - **New regression test**: `tests/sync.test.ts` — two users, one stores
+    a transaction under message id `"msg1"`; asserts `unseenIds()` for the
+    *other* user still returns `"msg1"` as unseen, and for the owning user
+    correctly excludes it. This is a real regression test — it exercises
+    exactly the code path the bug was in, not just a general isolation
+    smoke test.
+  - **Green gates all pass**: typecheck clean (after clearing a stale
+    `.next` type-cache that still referenced the deleted `/register`
+    routes — expected, not a real error); `npm run test` — 69/69 (68 + the
+    new sync test); lint clean.
+
 ## In progress
 
-- Nothing mid-flight. Repo is fully green on Postgres/postgres.js/PGlite.
+- Nothing mid-flight. Repo is fully green.
 
 ## Next
 
-- **Phase 4 — Google-only auth + tenant-isolation audit**
-  (`MIGRATION_PLAN.md` §Phase 4): remove credentials provider from
-  `auth.ts`, delete `/register` page + `/api/register`, strip password
-  fields from the login form; fix the known cross-tenant bug (`unseenIds()`
-  in `sync.ts` missing a `userId` filter — deliberately left unfixed until
-  now); systematic audit of every query for a userId predicate; add a
-  tenant-isolation regression test.
-- User-side prerequisite still outstanding (needed before the first
-  `npx tsx migrate.ts` run, not before Phase 4): `DATABASE_URL` +
-  `MIGRATE_DATABASE_URL` in local `.env` — **done**, both are set in
-  `.env` as of this session.
+- **Phase 5 — Serverless sync correctness + cron** (`MIGRATION_PLAN.md`
+  §Phase 5): wrap `syncUser()` in `waitUntil()` for
+  `POST /api/gmail/sync`; replace the in-memory `locks`/`progress` Maps in
+  `sync.ts` with DB-column-based state (atomic `UPDATE ... WHERE
+  sync_status != 'syncing' RETURNING id` guard + persisted progress
+  columns — needs a new migration); gate `instrumentation-node.ts`'s
+  `setInterval` loop off when `process.env.VERCEL` is set; add the cron
+  route (`src/app/api/cron/sync/route.ts`, `CRON_SECRET`-protected,
+  oldest-`lastSyncAt`-first, ~250s cutoff) and `vercel.json`.
+- User-side prerequisite: `DATABASE_URL` + `MIGRATE_DATABASE_URL` in local
+  `.env` — **done**, both set as of the previous session. Migrations have
+  NOT yet been run against the real Supabase DB (`npx tsx migrate.ts`) —
+  still fine to defer to Phase 7 per the plan's risk mitigation, but two
+  migrations (`0000_...`, `0001_...`) are now queued up for that first run.
 - **Vercel Git auto-deploy is DISCONNECTED** (`vercel git disconnect`,
   2026-07-09) — every mid-migration push was triggering a doomed production
   build + failure email. **Phase 7 must run `vercel git connect` after the

@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { gmail_v1 } from "@googleapis/gmail";
 import { db } from "@/lib/db";
 import { gmailConnections, transactions, type GmailConnection } from "@/lib/db/schema";
@@ -75,13 +75,13 @@ function buildQuery(opts: { afterUnixSec?: number } = {}): string {
 }
 
 /** Filter out message ids we've already stored (chunked to keep parameter counts sane). */
-async function unseenIds(userId: string, ids: string[]): Promise<string[]> {
+export async function unseenIds(userId: string, ids: string[]): Promise<string[]> {
   const seen = new Set<string>();
   for (const part of chunk(ids, 400)) {
     const rows = await db
       .select({ id: transactions.gmailMessageId })
       .from(transactions)
-      .where(inArray(transactions.gmailMessageId, part));
+      .where(and(eq(transactions.userId, userId), inArray(transactions.gmailMessageId, part)));
     rows.forEach((r) => r.id && seen.add(r.id));
   }
   return ids.filter((id) => !seen.has(id));

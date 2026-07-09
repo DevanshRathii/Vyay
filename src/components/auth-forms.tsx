@@ -1,11 +1,10 @@
 "use client";
 
 import { IndianRupee } from "lucide-react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { Suspense, useState } from "react";
-import { Button, Card, Input, Label, Spinner } from "@/components/ui";
+import { Suspense } from "react";
+import { Button, Card } from "@/components/ui";
 
 function GoogleIcon() {
   return (
@@ -38,59 +37,21 @@ function AuthCard({ children, title, subtitle }: { children: React.ReactNode; ti
 }
 
 function LoginInner({ googleEnabled }: { googleEnabled: boolean }) {
-  const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") ?? "/";
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    const res = await signIn("credentials", { email, password, redirect: false });
-    setBusy(false);
-    if (res?.error) setError("Incorrect email or password.");
-    else {
-      router.push(next);
-      router.refresh();
-    }
-  }
 
   return (
-    <AuthCard title="Welcome back" subtitle="Sign in to your Vyay ledger">
-      <form onSubmit={submit} className="flex flex-col gap-3.5">
-        <div>
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="password">Password</Label>
-          <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
-        </div>
-        {error && <p className="text-[13px] text-negative">{error}</p>}
-        <Button type="submit" disabled={busy} className="mt-1">
-          {busy ? <Spinner className="border-white/40 border-t-white" /> : "Sign in"}
+    <AuthCard title="Welcome to Vyay" subtitle="Sign in to track expenses automatically from Gmail">
+      {googleEnabled ? (
+        <Button variant="secondary" className="w-full" onClick={() => signIn("google", { callbackUrl: next })}>
+          <GoogleIcon /> Continue with Google
         </Button>
-      </form>
-      {googleEnabled && (
-        <>
-          <div className="my-4 flex items-center gap-3 text-[12px] text-muted">
-            <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
-          </div>
-          <Button variant="secondary" className="w-full" onClick={() => signIn("google", { callbackUrl: next })}>
-            <GoogleIcon /> Continue with Google
-          </Button>
-        </>
+      ) : (
+        <p className="text-[13px] text-negative">
+          Google sign-in is not configured on this server. Set GOOGLE_CLIENT_ID and
+          GOOGLE_CLIENT_SECRET.
+        </p>
       )}
-      <p className="mt-4 text-center text-[13px] text-muted">
-        New here?{" "}
-        <Link href="/register" className="font-medium text-accent hover:underline">
-          Create an account
-        </Link>
-      </p>
     </AuthCard>
   );
 }
@@ -100,73 +61,5 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
     <Suspense>
       <LoginInner googleEnabled={googleEnabled} />
     </Suspense>
-  );
-}
-
-export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    const res = await fetch("/api/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setError(body.error ?? "Could not create the account.");
-      setBusy(false);
-      return;
-    }
-    await signIn("credentials", { email, password, redirect: false });
-    router.push("/");
-    router.refresh();
-  }
-
-  return (
-    <AuthCard title="Create your account" subtitle="Track expenses automatically from Gmail">
-      <form onSubmit={submit} className="flex flex-col gap-3.5">
-        <div>
-          <Label htmlFor="name">Name</Label>
-          <Input id="name" autoComplete="name" required value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-        </div>
-        <div>
-          <Label htmlFor="password">Password</Label>
-          <Input id="password" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" />
-        </div>
-        {error && <p className="text-[13px] text-negative">{error}</p>}
-        <Button type="submit" disabled={busy} className="mt-1">
-          {busy ? <Spinner className="border-white/40 border-t-white" /> : "Create account"}
-        </Button>
-      </form>
-      {googleEnabled && (
-        <>
-          <div className="my-4 flex items-center gap-3 text-[12px] text-muted">
-            <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
-          </div>
-          <Button variant="secondary" className="w-full" onClick={() => signIn("google", { callbackUrl: "/" })}>
-            <GoogleIcon /> Continue with Google
-          </Button>
-        </>
-      )}
-      <p className="mt-4 text-center text-[13px] text-muted">
-        Already have an account?{" "}
-        <Link href="/login" className="font-medium text-accent hover:underline">
-          Sign in
-        </Link>
-      </p>
-    </AuthCard>
   );
 }

@@ -1,10 +1,10 @@
 /**
- * Seed a demo account with realistic data:
- *   email: demo@vyay.app  password: demo1234
+ * Seed a demo account with realistic data. Sign in via Google using this
+ * email address — auth is Google-only, so there is no password.
+ *   email: demo@vyay.app
  *
  * Run with: npm run db:seed
  */
-import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { categories, transactions, users } from "@/lib/db/schema";
@@ -62,10 +62,7 @@ async function main() {
     await db.delete(users).where(eq(users.id, existing.id));
   }
 
-  const passwordHash = await bcrypt.hash("demo1234", 12);
-  const user = (
-    await db.insert(users).values({ email, name: "Demo User", passwordHash }).returning()
-  )[0];
+  const user = (await db.insert(users).values({ email, name: "Demo User" }).returning())[0];
 
   await ensureDefaultCategories(user.id);
   const cats = await db.select().from(categories).where(eq(categories.userId, user.id));
@@ -171,7 +168,7 @@ async function main() {
   });
   count += 2;
 
-  console.log(`Seeded ${count} transactions for ${email} (password: demo1234).`);
+  console.log(`Seeded ${count} transactions for ${email}. Sign in with Google using this address.`);
 }
 
 main().catch((err) => {

@@ -3,7 +3,7 @@ import Google from "next-auth/providers/google";
 
 /**
  * Edge-safe auth config — used by middleware. Contains no database imports.
- * The full config (credentials provider + user upserts) lives in auth.ts.
+ * The full config (Google user upsert on first sign-in) lives in auth.ts.
  */
 export const googleLoginEnabled = Boolean(
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,

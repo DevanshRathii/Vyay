@@ -28,8 +28,6 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name"),
   image: text("image"),
-  /** bcrypt hash; unused since the move to Google-only sign-in */
-  passwordHash: text("password_hash"),
   createdAt: now(),
 });
 
