@@ -78,6 +78,10 @@
 - User-side prerequisite still outstanding (needed before the first
   `npx tsx migrate.ts` run, not before Phase 4): `DATABASE_URL` +
   `MIGRATE_DATABASE_URL` in local `.env` (see Phase 1 notes above).
+- **Vercel Git auto-deploy is DISCONNECTED** (`vercel git disconnect`,
+  2026-07-09) — every mid-migration push was triggering a doomed production
+  build + failure email. **Phase 7 must run `vercel git connect` after the
+  first successful manual deploy.**
 
 ## Decisions log
 
