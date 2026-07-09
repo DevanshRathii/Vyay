@@ -1,10 +1,10 @@
 # Vyay
 
-**Automatic expense tracking from your Gmail transaction emails — self-hosted, private, built for India.**
+**Automatic expense tracking from your Gmail transaction emails — private, multi-tenant, built for India.**
 
 Every UPI payment, card swipe, and bank transfer in India generates an email. Vyay connects to your Gmail with read-only access, parses those alerts from 17+ Indian banks and payment apps, and turns your inbox into a clean, categorized, searchable ledger — with analytics, Excel export, and an Apple Shortcut for logging cash context on the go.
 
-Your data never leaves your server. SQLite file, encrypted OAuth tokens, no third-party services.
+Vyay runs as a hosted app (Vercel + Supabase Postgres) with Google-only sign-in — each user's Gmail connection, tokens, and transactions are isolated to their own account (every query is scoped by `userId`). It can also run self-hosted against any Postgres database. Gmail OAuth tokens are AES-256-GCM encrypted at rest either way; no third-party services beyond Google (for auth/Gmail) and your Postgres host.
 
 ## Features
 
@@ -15,7 +15,7 @@ Your data never leaves your server. SQLite file, encrypted OAuth tokens, no thir
 - **Analytics** — spend by category, channel, merchant, day, and a 12-month trend.
 - **Excel export** — the classic ledger format: Date, Time, Payment Channel, Paid To/Paid By, Amount, Debit/Credit, Category, Notes.
 - **Apple Shortcut endpoint** — log `{amount, category, notes}` from your phone in two taps. Vyay pairs the log with the matching bank email: one candidate applies instantly, several go to a Matches screen, none yet waits and auto-resolves when the email lands.
-- **Incremental Gmail sync** — history-based delta sync every 15 minutes (configurable), with automatic fallback to query sync when the history window expires. Access tokens are encrypted (AES-256-GCM) at rest.
+- **Incremental Gmail sync** — history-based delta sync every 15 minutes when self-hosted (configurable), or via a daily Vercel Cron job when deployed serverlessly, with automatic fallback to query sync when the history window expires. Access tokens are encrypted (AES-256-GCM) at rest.
 - **PWA** — installable on your phone's home screen, responsive down to small phones, dark mode.
 
 ## Architecture
@@ -26,23 +26,26 @@ Next.js 15 (App Router, React 19, TypeScript)
 ├── src/lib/gmail/        OAuth client, MIME fetch, full/incremental sync
 ├── src/lib/ingest.ts     email → classified → parsed → categorized → stored
 ├── src/lib/match.ts      Apple Shortcut ↔ transaction pairing
-├── src/lib/db/           Drizzle ORM + better-sqlite3 (single-file DB)
+├── src/lib/db/           Drizzle ORM + postgres.js (Postgres, e.g. Supabase)
 ├── src/app/api/          REST routes (auth, transactions, analytics, export…)
+├── src/app/api/cron/sync/  daily sync sweep (Vercel Cron, CRON_SECRET-protected)
 ├── src/app/(app)/        Overview, Ledger, Categories, Matches, Settings
-└── src/instrumentation-node.ts   background sync loop
+└── src/instrumentation-node.ts   self-host-only background sync loop
 ```
 
 Design decisions worth knowing:
 
-- **Amounts are integers (paise)** — no floating point money.
+- **Amounts are integers (paise)** — no floating point money. Timestamps are epoch-milliseconds (`bigint`), not native Postgres timestamps — deliberate, for exact IST-aware bucketing without timezone-conversion surprises.
 - **Idempotent ingestion** — a unique index on `(userId, gmailMessageId)` makes re-syncing safe.
+- **Multi-tenant by construction** — every table is scoped by `userId`; every query filters on it (or on an id already verified as user-owned). One user's Gmail sync can never see or touch another user's data.
 - **The parsing engine is generic**; providers mostly contribute sender patterns. Adding a bank is a ~10-line entry in `src/lib/parsing/providers.ts`.
-- **Auth.js v5 split config** — `auth.config.ts` stays edge-safe for middleware; bcrypt and DB access live in `auth.ts` (Node only).
+- **Auth.js v5, split config, Google-only** — `auth.config.ts` stays edge-safe for middleware; the Google user-upsert lives in `auth.ts` (Node only). There is no password login.
+- **Serverless-safe sync** — the Gmail sync lock and live progress are DB columns on `gmail_connections`, not in-memory state, so they hold correctly across separate Vercel function invocations. A lock older than 10 minutes (crashed invocation) is automatically reclaimed.
 - **Everything is IST-aware** — daily/monthly buckets use Asia/Kolkata regardless of server timezone.
 
 ## Getting started
 
-Requires Node.js 20+.
+Requires Node.js 20.12+ (for `process.loadEnvFile`) and a Postgres database — the free tier of [Supabase](https://supabase.com) works well, or any local/self-hosted Postgres.
 
 ```bash
 git clone <your-fork> vyay && cd vyay
@@ -50,25 +53,26 @@ npm install
 cp .env.example .env
 # fill AUTH_SECRET and ENCRYPTION_KEY:
 openssl rand -base64 32   # run twice, paste into .env
+# fill DATABASE_URL (and MIGRATE_DATABASE_URL) with your Postgres connection string(s) —
+# see "Environment variables" below for the Supabase pooler/direct-connection distinction
+npx tsx migrate.ts   # applies the schema
 npm run dev
 ```
 
-Open http://localhost:3000, create an account with email + password, and explore. To try it with demo data first:
+Sign-in is Google-only (see "Connecting Gmail" below for OAuth setup — the same credentials cover login and Gmail access). Open http://localhost:3000 and sign in. To try it with demo data first:
 
 ```bash
-npm run db:seed   # creates demo@vyay.app / demo1234 with 90 transactions
+npm run db:seed   # creates demo@vyay.app with 90 transactions — sign in with Google using that address
 ```
-
-> **Native module note:** `better-sqlite3` compiles a native binding. If `npm install` fails trying to download Node headers (offline/proxied environments), point node-gyp at your local headers: `npm_config_nodedir=/usr npm install` (wherever `node_api.h` lives, e.g. `/usr/include/node` on Debian/Ubuntu with NodeSource).
 
 ## Connecting Gmail
 
-Vyay needs its own Google OAuth credentials (a few minutes, free):
+Google OAuth credentials are required — they cover both sign-in and Gmail access (a few minutes, free):
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com) → create a project (e.g. "Vyay").
 2. **APIs & Services → Library** → enable the **Gmail API**.
-3. **APIs & Services → OAuth consent screen** → External → fill the app name and your email. Add yourself as a **test user** (personal use never needs verification).
-4. Add the scope `https://www.googleapis.com/auth/gmail.readonly`. If you also want "Sign in with Google", the default openid/email/profile scopes are included automatically.
+3. **APIs & Services → OAuth consent screen** → External → fill the app name and your email. Add every account that should be able to sign in as a **test user** (up to 100 while the app is unverified — see Troubleshooting for what that means for token lifetime).
+4. Add the scope `https://www.googleapis.com/auth/gmail.readonly`. The default openid/email/profile scopes (used for sign-in) are included automatically.
 5. **Credentials → Create credentials → OAuth client ID → Web application**, and add **both** redirect URIs:
    - `{APP_URL}/api/auth/callback/google` — Google login
    - `{APP_URL}/api/gmail/callback` — Gmail connection
@@ -107,10 +111,12 @@ Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (
 | `APP_URL` | yes | `http://localhost:3000` | Public URL, used in OAuth redirects |
 | `AUTH_SECRET` | yes | — | Session signing key (`openssl rand -base64 32`) |
 | `ENCRYPTION_KEY` | yes | — | 32-byte base64 key for token encryption |
-| `DATABASE_PATH` | no | `./data/vyay.db` | SQLite file location |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Gmail | — | OAuth credentials (see above) |
+| `DATABASE_URL` | yes | — | Postgres connection string used by the app at runtime. On Supabase, use the **transaction pooler** (port 6543) |
+| `MIGRATE_DATABASE_URL` | yes | — | Postgres connection string used only by `npx tsx migrate.ts`. On Supabase, use the **session pooler** or **direct connection** (port 5432) — never the transaction pooler. On Vercel specifically, the direct connection is IPv6-only and unreachable from build containers, so use the session pooler there |
+| `CRON_SECRET` | for Vercel Cron | — | Bearer token Vercel sends to `/api/cron/sync`; set it and Vercel supplies the header automatically |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | yes | — | OAuth credentials (see above) — required for sign-in, not just Gmail |
 | `SYNC_LOOKBACK_MONTHS` | no | — (since 1-Jan-2026) | Initial sync window as a rolling number of months back; unset uses the fixed 1-Jan-2026 anchor instead |
-| `SYNC_INTERVAL_MINUTES` | no | `15` | Background sync cadence (`0` disables) |
+| `SYNC_INTERVAL_MINUTES` | no | `15` | Self-host background sync cadence (`0` disables — required on Vercel, which uses Cron instead) |
 | `SYNC_MAX_INITIAL_MESSAGES` | no | `3000` | Initial sync safety cap |
 | `EXTRA_GMAIL_QUERY` | no | — | Extra Gmail search terms, e.g. `from:(mybank.com)` |
 
@@ -129,16 +135,24 @@ npm run db:seed      # demo account with sample data
 
 ## Deployment
 
-Vyay is a single Node process with a SQLite file — a small VPS, home server, or Raspberry Pi is plenty.
+### Vercel + Supabase (recommended)
+
+1. Create a Supabase project, then set `DATABASE_URL` (transaction pooler) and `MIGRATE_DATABASE_URL` (session pooler — see the env var table above for why) as Vercel **Production** environment variables: `vercel env add DATABASE_URL production` (paste the connection string when prompted, or pipe it in so it never lands in shell history).
+2. Set the rest of the production env vars the same way: `AUTH_SECRET`, `ENCRYPTION_KEY`, `CRON_SECRET` (generate fresh values for production — don't reuse local dev secrets — e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" | vercel env add ENCRYPTION_KEY production`), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_URL` (your Vercel production URL), `SYNC_INTERVAL_MINUTES=0`.
+3. `package.json`'s `build` script runs `tsx migrate.ts && next build`, so every deploy applies pending migrations before building — no separate migrate step.
+4. `vercel deploy --prod`. `vercel.json` schedules a daily Vercel Cron hitting `/api/cron/sync` (`CRON_SECRET`-protected), which syncs every connected account oldest-first, stopping cleanly under the 300s function budget — any leftovers pick up on the next day's run or a manual "Sync now".
+5. In Google Cloud Console, add the production redirect URIs (`{APP_URL}/api/auth/callback/google` and `{APP_URL}/api/gmail/callback`) and add test users on the OAuth consent screen (up to 100 while unverified — see Troubleshooting).
+
+### Self-hosted (VPS, home server, Raspberry Pi)
 
 ```bash
-npm run build
+npm run build          # runs migrations, then builds
 SYNC_INTERVAL_MINUTES=15 npm run start   # behind Caddy/nginx for TLS
 ```
 
 - Set `APP_URL` to your public HTTPS URL and add both redirect URIs (with that host) in Google Cloud.
-- Back up `data/vyay.db` (that's everything).
-- Serverless platforms: disable the in-process loop (`SYNC_INTERVAL_MINUTES=0`) and hit `POST /api/gmail/sync` from a cron. Note SQLite needs a persistent disk — a container/VM is a better fit than lambda-style hosting.
+- Any reachable Postgres works — a small VPS-local instance, a managed service, or Supabase.
+- The in-process sync loop (`SYNC_INTERVAL_MINUTES`) replaces the Vercel Cron in this mode; it's automatically disabled when `process.env.VERCEL` is set, so the two never double-run against the same deployment.
 
 ## Adding a bank or payment app
 
@@ -162,15 +176,17 @@ Open `src/lib/parsing/providers.ts` and append an entry:
 - **Sync says error 403/429** — Gmail API quota; the sync retries with backoff automatically. If it persists, verify the Gmail API is enabled in your Cloud project.
 - **Transactions missing** — check the email is from a supported sender domain (`providers.ts`), isn't classified as noise (forward one to yourself and inspect with a unit test), and falls inside `SYNC_LOOKBACK_MONTHS`. Use **Full resync** in Settings after changing lookback.
 - **A parse is wrong** — every transaction stores the raw subject/body snippet (open a transaction in the Ledger to see the details and parse confidence). Fixtures + a fix in `src/lib/parsing/engine.ts` are welcome.
-- **`better-sqlite3` build errors** — see the native module note under Getting started.
+- **A test user's Gmail connection stops working after ~7 days** — while the Google Cloud project's OAuth consent screen is in **Testing** mode (the default, and fine up to 100 users), Google expires refresh tokens for external test apps after 7 days of inactivity from Google's own review process, independent of anything Vyay does. Reconnecting Gmail in Settings fixes it. To avoid this entirely, either move the consent screen to **In production** (no formal verification needed at this user count for a `gmail.readonly`-only app, though Google may still show an "unverified app" warning to users) or accept the periodic reconnect.
+- **Vercel build fails with `ENETUNREACH` on the migration step** — `MIGRATE_DATABASE_URL` is pointed at Supabase's direct connection host, which is IPv6-only; Vercel's build containers have no outbound IPv6. Switch to the session pooler connection string (see the env var table above).
 
 ## Privacy & security
 
 - Gmail scope is read-only; nothing is ever written to your mailbox.
-- OAuth tokens are AES-256-GCM encrypted at rest; API tokens are stored as SHA-256 hashes and shown once.
-- Passwords use bcrypt (cost 12). Sessions are JWT-signed HTTP-only cookies.
+- OAuth tokens are AES-256-GCM encrypted at rest, decrypted only in memory at the moment of a Gmail API call; API tokens are stored as SHA-256 hashes and shown once.
+- Sign-in is Google-only. Sessions are JWT-signed HTTP-only cookies.
+- Every table is scoped by `userId` — one user's Gmail sync, transactions, categories, contacts, and API tokens are never visible to another user, whether self-hosted or on the hosted multi-tenant deployment.
 - Raw email storage is truncated to the first 2,000 characters of body text, kept only for parse debugging.
-- Everything lives in one SQLite file you control.
+- Your data lives in whichever Postgres database you point Vyay at — a database you control, whether that's Supabase, another managed host, or your own server.
 
 ## Roadmap ideas
 
@@ -178,4 +194,4 @@ Budgets and alerts, multi-account households, SMS ingestion (via the Shortcut en
 
 ---
 
-MIT licensed. Built with Next.js, Drizzle, and better-sqlite3. *Vyay* (व्यय) is Hindi for "expense".
+MIT licensed. Built with Next.js, Drizzle, and Postgres. *Vyay* (व्यय) is Hindi for "expense".

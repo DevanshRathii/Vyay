@@ -165,27 +165,97 @@
     `vercel env ls production` (values show as `Encrypted`, not
     readable — exactly as expected; names/timestamps only).
 
+- **Phase 7: complete.** Production is live at
+  **https://vyay-five.vercel.app**.
+  - `package.json` build script → `tsx migrate.ts && next build`.
+  - **All 8 production env vars set**: `ENCRYPTION_KEY`/`AUTH_SECRET`/
+    `CRON_SECRET` (Phase 6, user-generated), `GOOGLE_CLIENT_ID` +
+    `SYNC_INTERVAL_MINUTES=0` (non-secret, set directly), and
+    `GOOGLE_CLIENT_SECRET`/`DATABASE_URL`/`MIGRATE_DATABASE_URL`/`APP_URL`
+    (secret-bearing — user set the first three from their own terminal,
+    reading straight out of local `.env` and piping into
+    `vercel env add <NAME> production` so nothing was retyped or exposed
+    in this chat; `APP_URL` was set by the agent after the first deploy
+    reported the production URL, since it's a runtime-only, non-secret
+    value).
+  - **De-risked before deploying**: ran `npx tsx migrate.ts` locally
+    against the real Supabase DB first (per the plan's own risk
+    mitigation) — succeeded, and a follow-up query confirmed all 8 tables
+    exist (`api_tokens`, `categories`, `contacts`, `gmail_connections`,
+    `merchant_rules`, `shortcut_events`, `transactions`, `users`).
+  - **Found a real deploy-time bug the local run couldn't catch**: the
+    first `vercel deploy --prod` failed at the migration step with
+    `ENETUNREACH` connecting to
+    `db.llciwbpnlmlroromfdoc.supabase.co:5432`. Root cause: Supabase's
+    **direct connection** host is IPv6-only, and Vercel's build
+    containers have no outbound IPv6 — this only surfaces in Vercel's
+    build environment, not a normal dev machine with IPv6 connectivity
+    (which is why the local pre-deploy check passed). **Fix**:
+    `MIGRATE_DATABASE_URL` must be the **session pooler** connection
+    string instead (also port 5432, but reachable over IPv4 through
+    Supabase's proxy) — never the transaction pooler (port 6543, breaks
+    migrations' need for session-scoped statements) and never the direct
+    connection (works locally, fails on Vercel specifically). User updated
+    local `.env` and the Vercel env var to the session pooler string;
+    verified locally again (idempotent — `already exists, skipping`
+    notices, `[migrate] all migrations applied`) before redeploying.
+    Documented in `.env.example`, `migrate.ts`'s header comment, and
+    README's env var table + Troubleshooting section, so this doesn't
+    bite anyone else setting this up.
+  - **Redeploy succeeded**: build completed (`next build` compiled, all
+    ~30 routes traced as serverless functions), deployment `READY`,
+    aliased to `https://vyay-five.vercel.app`.
+  - **Smoke-checked**: `/login` returns 200 and renders the Google
+    sign-in button; `/api/gmail/status` correctly returns 401 unauthenticated
+    (confirms the auth/middleware stack is running end-to-end in
+    production).
+  - **Git auto-deploy reconnected** (`vercel git connect`) now that a
+    manual deploy has succeeded — future pushes to `main` will deploy
+    automatically again, as originally intended before it was disconnected
+    mid-migration.
+  - **README.md fully rewritten** for the new architecture: Postgres
+    instead of SQLite throughout, Google-only sign-in (no more
+    email+password instructions), a new two-path Deployment section
+    (Vercel+Supabase primary, self-host secondary), an expanded env var
+    table (`DATABASE_URL`/`MIGRATE_DATABASE_URL`/`CRON_SECRET`, with the
+    session-pooler-vs-direct-connection gotcha called out), two new
+    Troubleshooting entries (the `ENETUNREACH` gotcha, and Google's 7-day
+    test-mode refresh-token expiry), and an updated Privacy & security
+    section (multi-tenant isolation language, no more bcrypt/"one SQLite
+    file" claims).
+  - **`CLAUDE.md` intentionally NOT updated yet** — it's stale in several
+    places (describes boot-time auto-migration, the deleted Credentials
+    provider, better-sqlite3) but updating it is explicitly a Phase 8 item
+    per the plan, not Phase 7. Don't mistake this for an oversight if
+    picking up mid-Phase-8.
+  - Green gates all pass: typecheck clean; `npm run test` — 72/72; lint
+    clean.
+
 ## In progress
 
-- Nothing mid-flight. Repo is fully green, Phase 6 fully closed.
+- Nothing mid-flight. **Production is live and smoke-checked.** Repo fully
+  green.
 
 ## Next
 
-- **Phase 7 — Deployment** (`MIGRATION_PLAN.md` §Phase 7): `package.json`
-  build script →
-  `tsx migrate.ts && next build`; set remaining Vercel envs
-  (`DATABASE_URL`, `MIGRATE_DATABASE_URL`, `GOOGLE_CLIENT_ID`,
-  `GOOGLE_CLIENT_SECRET`, `APP_URL`, `SYNC_INTERVAL_MINUTES=0` — the DB
-  connection strings contain the DB password, so those two also go through
-  the user via `!`/their own terminal, not me); `vercel deploy --prod`;
-  reconnect Git auto-deploy (`vercel git connect`) only after that first
-  manual deploy succeeds; update README.
-- User-side prerequisite: `DATABASE_URL` + `MIGRATE_DATABASE_URL` in local
-  `.env` — **done**, both set as of a previous session. Migrations have
-  NOT yet been run against the real Supabase DB (`npx tsx migrate.ts`) —
-  still fine to defer to Phase 7 per the plan's risk mitigation, but THREE
-  migrations (`0000_...`, `0001_...`, `0002_...`) are now queued up for
-  that first run.
+- **Phase 8 — Handover** (`MIGRATION_PLAN.md` §Phase 8): rewrite
+  `CLAUDE.md` for the current architecture (see the stale-points list
+  above); write the exact manual Google Cloud Console steps for the user
+  (add the two production redirect URIs, add test users, note the 7-day
+  test-mode token expiry trade-off — README's Troubleshooting section
+  already covers the user-facing version of this, Phase 8 should point
+  there rather than duplicate it); write a smoke-test checklist covering
+  what a real signed-in user flow needs (Google sign-in as a *second*
+  test account, not just the unauthenticated checks already done — Gmail
+  connect + consent screen scope display, initial sync populating the
+  ledger, tenant isolation between two real accounts, manual "Sync now",
+  cron route 401-without-secret/200-with-secret, Excel export, Apple
+  Shortcut token + log, contacts import, re-parse).
+- **Still outstanding, not blocking**: the stray pre-migration auto-deployment
+  mentioned at the very top of this doc (from before any migration work
+  started) — worth a quick look in the Vercel dashboard during Phase 8 to
+  confirm it's just an old failed/superseded deployment, not something
+  needing cleanup.
 - **Vercel Git auto-deploy is DISCONNECTED** (`vercel git disconnect`,
   2026-07-09) — every mid-migration push was triggering a doomed production
   build + failure email. **Phase 7 must run `vercel git connect` after the
