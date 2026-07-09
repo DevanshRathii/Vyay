@@ -39,20 +39,45 @@
     mis-stated in the plan ("typecheck as Phase 2 gate"); real gates were:
     schema compiles in isolation, migration generates, deps install.
 
-## In progress
+- **Phase 3 batches A–C + most of D**: async conversion done for all core
+  lib (categorize, match, ingest, contacts/*, reparse), the whole gmail path
+  (sync.ts, client.ts — token event handler is fire-and-forget with
+  `.catch`, can't await in an event listener — and all 4 gmail routes), all
+  API routes (transactions, categories, rules, matches, contacts, tokens,
+  analytics, export, shortcut/log, register), and `src/auth.ts`.
+  Conversion conventions used everywhere:
+  `.all()` → `await q`; `.get()` → `(await q.limit(1))[0]`;
+  `.run()` → `await q`; better-sqlite3 `res.changes === 0` checks →
+  `.returning({id}).length === 0` (works on both postgres.js and PGlite);
+  `initialSyncDone` writes now use booleans.
 
-- Nothing mid-flight, but **the repo does not typecheck** until Phase 3
-  batches land (expected, tracked, next up).
+## In progress — EXACT HANDOVER STATE (session wrapped up here)
+
+- **Phase 3 batch D is one file from done**: `src/lib/db/seed.ts` still has
+  the last **8 sync call sites** (verify with
+  `grep -E "\.(get|all|run)\(\)" src/` — only seed.ts should appear).
+  Same mechanical conversion as everywhere else; `main()` is already async.
+- **The repo does not typecheck until seed.ts is converted** (expected and
+  tracked since Phase 2 — this is the known red→green arc, nothing is
+  broken beyond that one file).
+- After seed.ts, run the Phase 3 end gates, all of which are still pending:
+  1. `npm run typecheck` → must be green
+  2. `npm run test` → 68 tests must pass on the new PGlite harness
+     (first PGlite run may surface driver quirks — e.g. `.returning()`
+     shapes or DO-block DDL in tests/helpers/pglite.ts; fix there, not in
+     app code, unless app code is genuinely wrong)
+  3. `npm run lint`
+  4. Commit "Phase 3 batch D + green gates", push.
 
 ## Next
 
-- **Phase 3 — async conversion** (`MIGRATION_PLAN.md` §Phase 3), batches:
-  A core lib (categorize, match, ingest, contacts/*, reparse) →
-  B gmail path (sync, client, gmail routes) →
-  C remaining API routes →
-  D auth.ts + seed.ts.
-  Gate per batch: shrinking `\.(get|all|run)\(\)` grep count; final gate:
-  typecheck + vitest + lint all green, then commit per batch.
+- Finish batch D as above, then **Phase 4 — Google-only auth +
+  tenant-isolation audit** (`MIGRATION_PLAN.md` §Phase 4). Reminder: the
+  known cross-tenant bug (`unseenIds()` in sync.ts missing a userId filter)
+  is deliberately NOT yet fixed — it belongs to Phase 4 step 2.
+- User-side prerequisite still outstanding (needed before the first
+  `npx tsx migrate.ts` run, not before Phase 4): `DATABASE_URL` +
+  `MIGRATE_DATABASE_URL` in local `.env` (see Phase 1 notes above).
 
 ## Decisions log
 

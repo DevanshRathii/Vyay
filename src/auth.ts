@@ -23,7 +23,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const parsed = credentialsSchema.safeParse(raw);
         if (!parsed.success) return null;
         const { email, password } = parsed.data;
-        const user = db.select().from(users).where(eq(users.email, email.toLowerCase())).get();
+        const user = (
+          await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1)
+        )[0];
         if (!user?.passwordHash) return null;
         const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) return null;
@@ -37,18 +39,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // On initial sign-in, resolve (or create) the database user and pin its id.
       if (account?.provider === "google" && profile?.email) {
         const email = profile.email.toLowerCase();
-        let dbUser = db.select().from(users).where(eq(users.email, email)).get();
+        let dbUser = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
         if (!dbUser) {
-          dbUser = db
-            .insert(users)
-            .values({
-              email,
-              name: profile.name ?? email.split("@")[0],
-              image: typeof profile.picture === "string" ? profile.picture : null,
-            })
-            .returning()
-            .get();
-          ensureDefaultCategories(dbUser.id);
+          dbUser = (
+            await db
+              .insert(users)
+              .values({
+                email,
+                name: profile.name ?? email.split("@")[0],
+                image: typeof profile.picture === "string" ? profile.picture : null,
+              })
+              .returning()
+          )[0];
+          await ensureDefaultCategories(dbUser.id);
         }
         token.uid = dbUser.id;
       } else if (user?.id) {
