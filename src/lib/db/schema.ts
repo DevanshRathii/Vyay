@@ -49,6 +49,12 @@ export const gmailConnections = pgTable("gmail_connections", {
   initialSyncDone: boolean("initial_sync_done").notNull().default(false),
   syncStatus: text("sync_status").notNull().default("idle"), // idle | syncing | error
   syncError: text("sync_error"),
+  /** Set when the sync lock is acquired; a stale "syncing" row (crashed
+   *  serverless invocation) is reclaimable after STALE_SYNC_MS. */
+  syncStartedAt: epochMs("sync_started_at"),
+  syncProgressPhase: text("sync_progress_phase"), // listing | ingesting
+  syncProgressDone: integer("sync_progress_done"),
+  syncProgressTotal: integer("sync_progress_total"),
   /** running counters for the settings page */
   totalSynced: integer("total_synced").notNull().default(0),
   createdAt: now(),

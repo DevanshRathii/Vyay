@@ -92,26 +92,73 @@
     routes — expected, not a real error); `npm run test` — 69/69 (68 + the
     new sync test); lint clean.
 
+- **Phase 5: complete.** Serverless sync correctness:
+  - **DB-backed lock replaces the in-memory `locks` Map**: `syncUser()` now
+    does an atomic `UPDATE gmail_connections SET sync_status='syncing', ...
+    WHERE id=$1 AND (sync_status != 'syncing' OR sync_started_at IS NULL OR
+    sync_started_at < now - 10min) RETURNING *`. Zero rows returned ⇒
+    another invocation genuinely holds the lock ⇒ throws the new
+    `SyncInProgressError` (callers treat this as a harmless no-op, not a
+    real failure). A `syncing` row older than 10 minutes (new
+    `syncStartedAt` column) is treated as an abandoned/crashed invocation
+    and reclaimed — this is what makes it safe across serverless instances,
+    unlike the old per-process Map.
+  - **DB-backed progress replaces the in-memory `progress` Map**: new
+    `syncProgressPhase`/`syncProgressDone`/`syncProgressTotal` columns on
+    `gmailConnections`, written by a `setProgress()` helper. Writes during
+    the ingest loop are throttled to every 20 items (or on completion) —
+    UI already polls every 1.5s while syncing, so this stays visually
+    smooth without one UPDATE per message on a 3000-message initial sync.
+    `getSyncProgress()` removed; `/api/gmail/status` now reads progress
+    straight off the connection row it already fetches.
+  - New migration `drizzle/0002_chubby_ezekiel.sql` adds the 4 columns
+    above (`sync_started_at`, `sync_progress_phase`, `sync_progress_done`,
+    `sync_progress_total`) — 3 migrations now queued for the first real
+    `npx tsx migrate.ts` run (Phase 7).
+  - **`waitUntil()` wrapping** (`@vercel/functions`) on both places that
+    were fire-and-forgetting `syncUser()`: `POST /api/gmail/sync` (the
+    known bug from planning) **and** `GET /api/gmail/callback`'s
+    post-OAuth-connect initial sync kickoff (found during this phase — same
+    bug, wasn't in the original known-bugs list, same fix). Both routes get
+    `export const maxDuration = 300`.
+  - **Cron**: `src/app/api/cron/sync/route.ts` — `CRON_SECRET`-protected
+    (`Authorization: Bearer` header, 401 otherwise), iterates all
+    connections oldest-`lastSyncAt`-first (nulls/never-synced first, via
+    `connectionsOldestFirst()`), calls `syncUser()` sequentially, stops
+    cleanly at a 250s cutoff (under the 300s function budget) and reports
+    `{synced, alreadySyncing, failed, remaining, cutoff}`. `vercel.json`
+    added: daily at `30 2 * * *` UTC = 08:00 IST.
+  - **`instrumentation-node.ts`** setInterval loop now gated off when
+    `process.env.VERCEL` is set (self-host-only; Vercel cron replaces it).
+  - **New tests** in `tests/sync.test.ts`: lock semantics — a fresh
+    `syncing` row blocks a second `syncUser()` call
+    (`SyncInProgressError`); a stale (>10min) `syncing` row is reclaimed
+    (call proceeds past the guard); one user's held lock never blocks
+    another user's sync. These don't need Gmail API mocking — the guard
+    fires (or doesn't) before any Gmail call.
+  - **Green gates all pass**: typecheck clean; `npm run test` — 72/72
+    (69 + 3 new lock tests); lint clean.
+
 ## In progress
 
 - Nothing mid-flight. Repo is fully green.
 
 ## Next
 
-- **Phase 5 — Serverless sync correctness + cron** (`MIGRATION_PLAN.md`
-  §Phase 5): wrap `syncUser()` in `waitUntil()` for
-  `POST /api/gmail/sync`; replace the in-memory `locks`/`progress` Maps in
-  `sync.ts` with DB-column-based state (atomic `UPDATE ... WHERE
-  sync_status != 'syncing' RETURNING id` guard + persisted progress
-  columns — needs a new migration); gate `instrumentation-node.ts`'s
-  `setInterval` loop off when `process.env.VERCEL` is set; add the cron
-  route (`src/app/api/cron/sync/route.ts`, `CRON_SECRET`-protected,
-  oldest-`lastSyncAt`-first, ~250s cutoff) and `vercel.json`.
+- **Phase 6 — Encryption verification + trust UI** (`MIGRATION_PLAN.md`
+  §Phase 6): verify AES-256-GCM in `crypto.ts` meets spec (already
+  believed to, from earlier planning — just needs documenting, not
+  rewriting); generate NEW production `ENCRYPTION_KEY` + `AUTH_SECRET` +
+  `CRON_SECRET` (passwords/secrets must not pass through agent tool calls
+  — same protocol as the DB password: user generates/sets these
+  themselves); trust-UI tooltip near the Gmail connect button in
+  `settings.tsx` explaining tokens are encrypted at rest and read-only.
 - User-side prerequisite: `DATABASE_URL` + `MIGRATE_DATABASE_URL` in local
-  `.env` — **done**, both set as of the previous session. Migrations have
+  `.env` — **done**, both set as of a previous session. Migrations have
   NOT yet been run against the real Supabase DB (`npx tsx migrate.ts`) —
-  still fine to defer to Phase 7 per the plan's risk mitigation, but two
-  migrations (`0000_...`, `0001_...`) are now queued up for that first run.
+  still fine to defer to Phase 7 per the plan's risk mitigation, but THREE
+  migrations (`0000_...`, `0001_...`, `0002_...`) are now queued up for
+  that first run.
 - **Vercel Git auto-deploy is DISCONNECTED** (`vercel git disconnect`,
   2026-07-09) — every mid-migration push was triggering a doomed production
   build + failure email. **Phase 7 must run `vercel git connect` after the

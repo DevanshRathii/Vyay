@@ -1,13 +1,15 @@
 import { syncAllUsers } from "@/lib/gmail/sync";
 
 /**
- * Background Gmail sync loop. Serverless deployments should disable this
- * (SYNC_INTERVAL_MINUTES=0) and use an external cron hitting /api/gmail/sync.
+ * Background Gmail sync loop — self-host only. On Vercel there is no
+ * persistent process to hold a setInterval, and the platform's own cron
+ * (vercel.json → /api/cron/sync) drives syncing instead, so this is
+ * unconditionally disabled when process.env.VERCEL is set.
  */
 const minutes = Number(process.env.SYNC_INTERVAL_MINUTES ?? 15);
 const g = globalThis as unknown as { __vyaySyncTimer?: ReturnType<typeof setInterval> };
 
-if (minutes > 0 && !g.__vyaySyncTimer) {
+if (!process.env.VERCEL && minutes > 0 && !g.__vyaySyncTimer) {
   g.__vyaySyncTimer = setInterval(
     () => {
       syncAllUsers().catch((err) => console.error("[vyay] background sync error:", err));

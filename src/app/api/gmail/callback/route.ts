@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { gmailConnections } from "@/lib/db/schema";
 import { getUserId } from "@/lib/session";
 import { encrypt, verifyState } from "@/lib/crypto";
 import { oauthClient } from "@/lib/gmail/client";
-import { syncUser } from "@/lib/gmail/sync";
+import { SyncInProgressError, syncUser } from "@/lib/gmail/sync";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -58,7 +60,11 @@ export async function GET(req: Request) {
     .onConflictDoUpdate({ target: gmailConnections.userId, set: values });
 
   // Kick off the initial sync without blocking the redirect.
-  syncUser(userId).catch((err) => console.error("[vyay] initial sync failed:", err));
+  waitUntil(
+    syncUser(userId).catch((err) => {
+      if (!(err instanceof SyncInProgressError)) console.error("[vyay] initial sync failed:", err);
+    }),
+  );
 
   return NextResponse.redirect(`${appUrl}/settings?gmail_connected=1`);
 }

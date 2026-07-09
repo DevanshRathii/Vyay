@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { gmail_v1 } from "@googleapis/gmail";
 import { db } from "@/lib/db";
 import { gmailConnections, transactions, type GmailConnection } from "@/lib/db/schema";
@@ -17,21 +17,29 @@ export interface SyncSummary {
   mode: "initial" | "incremental" | "fallback";
 }
 
-// One sync at a time per user (in-memory; fine for a single-node self-host).
-const locks = new Map<string, Promise<SyncSummary>>();
+/** Thrown when another invocation already holds this user's sync lock. Not a failure. */
+export class SyncInProgressError extends Error {}
 
-export interface SyncProgress {
-  phase: "listing" | "ingesting";
-  processed: number;
-  total: number;
+// A "syncing" row older than this is assumed to belong to a crashed/killed
+// serverless invocation and can be reclaimed by a fresh sync.
+const STALE_SYNC_MS = 10 * 60 * 1000;
+
+// Progress writes are throttled (by item count) to avoid one DB round trip
+// per ingested message across a 3000-message initial sync.
+const PROGRESS_WRITE_EVERY = 20;
+
+type ProgressPhase = "listing" | "ingesting";
+
+/** Persist live progress for the status endpoint's polling. Best-effort. */
+async function setProgress(connId: string, phase: ProgressPhase, processed: number, total: number): Promise<void> {
+  await db
+    .update(gmailConnections)
+    .set({ syncProgressPhase: phase, syncProgressDone: processed, syncProgressTotal: total })
+    .where(eq(gmailConnections.id, connId));
 }
 
-// Live progress for the in-flight sync, if any (in-memory, same lifetime as `locks`).
-const progress = new Map<string, SyncProgress>();
-
-/** Read-only snapshot of a user's in-flight sync progress, for the status endpoint. */
-export function getSyncProgress(userId: string): SyncProgress | null {
-  return progress.get(userId) ?? null;
+function shouldWriteProgress(processed: number, total: number): boolean {
+  return processed === total || processed % PROGRESS_WRITE_EVERY === 0;
 }
 
 const CONCURRENCY = 4;
@@ -89,23 +97,23 @@ export async function unseenIds(userId: string, ids: string[]): Promise<string[]
 
 async function fetchAndIngest(
   gmail: gmail_v1.Gmail,
-  userId: string,
+  conn: GmailConnection,
   ids: string[],
 ): Promise<{ inserted: number; skipped: number }> {
-  const ctx = await loadCategorizerContext(userId);
-  const contactCtx = await loadContactContext(userId);
+  const ctx = await loadCategorizerContext(conn.userId);
+  const contactCtx = await loadContactContext(conn.userId);
   let inserted = 0;
   let skipped = 0;
   let processed = 0;
-  progress.set(userId, { phase: "ingesting", processed: 0, total: ids.length });
+  await setProgress(conn.id, "ingesting", 0, ids.length);
   await mapLimit(ids, CONCURRENCY, async (id) => {
     const res = await withRetry(() => gmail.users.messages.get({ userId: "me", id, format: "full" }));
     const email = toEmailMessage(res.data);
-    const outcome = await ingestEmail(userId, email, ctx, contactCtx);
+    const outcome = await ingestEmail(conn.userId, email, ctx, contactCtx);
     if (outcome.status === "inserted") inserted++;
     else skipped++;
     processed++;
-    progress.set(userId, { phase: "ingesting", processed, total: ids.length });
+    if (shouldWriteProgress(processed, ids.length)) await setProgress(conn.id, "ingesting", processed, ids.length);
   });
   return { inserted, skipped };
 }
@@ -124,18 +132,18 @@ async function fullSync(
   const maxTotal = Number(process.env.SYNC_MAX_INITIAL_MESSAGES ?? 3000);
   const ids: string[] = [];
   let pageToken: string | undefined;
-  progress.set(conn.userId, { phase: "listing", processed: 0, total: 0 });
+  await setProgress(conn.id, "listing", 0, 0);
   do {
     const res = await withRetry(() =>
       gmail.users.messages.list({ userId: "me", q, maxResults: 100, pageToken }),
     );
     res.data.messages?.forEach((m) => m.id && ids.push(m.id));
     pageToken = res.data.nextPageToken ?? undefined;
-    progress.set(conn.userId, { phase: "listing", processed: ids.length, total: 0 });
+    await setProgress(conn.id, "listing", ids.length, 0);
   } while (pageToken && ids.length < maxTotal);
 
   const fresh = await unseenIds(conn.userId, ids.slice(0, maxTotal));
-  const { inserted, skipped } = await fetchAndIngest(gmail, conn.userId, fresh);
+  const { inserted, skipped } = await fetchAndIngest(gmail, conn, fresh);
 
   await db
     .update(gmailConnections)
@@ -155,7 +163,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
   let pageToken: string | undefined;
   let latestHistoryId: string | null = conn.historyId;
 
-  progress.set(conn.userId, { phase: "listing", processed: 0, total: 0 });
+  await setProgress(conn.id, "listing", 0, 0);
   try {
     do {
       const res = await withRetry(() =>
@@ -174,7 +182,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
         }
       }
       pageToken = res.data.nextPageToken ?? undefined;
-      progress.set(conn.userId, { phase: "listing", processed: ids.length, total: 0 });
+      await setProgress(conn.id, "listing", ids.length, 0);
     } while (pageToken);
   } catch (err) {
     const status = (err as { code?: number; response?: { status?: number } })?.code ??
@@ -193,7 +201,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
   // for every personal email.
   const relevant: string[] = [];
   let filtered = 0;
-  progress.set(conn.userId, { phase: "listing", processed: 0, total: fresh.length });
+  await setProgress(conn.id, "listing", 0, fresh.length);
   await mapLimit(fresh, CONCURRENCY, async (id) => {
     const res = await withRetry(() =>
       gmail.users.messages.get({
@@ -206,10 +214,10 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
     const { from, subject } = headerFromMetadata(res.data);
     if (looksRelevant(from, subject)) relevant.push(id);
     filtered++;
-    progress.set(conn.userId, { phase: "listing", processed: filtered, total: fresh.length });
+    if (shouldWriteProgress(filtered, fresh.length)) await setProgress(conn.id, "listing", filtered, fresh.length);
   });
 
-  const { inserted, skipped } = await fetchAndIngest(gmail, conn.userId, relevant);
+  const { inserted, skipped } = await fetchAndIngest(gmail, conn, relevant);
 
   await db
     .update(gmailConnections)
@@ -224,49 +232,63 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
 }
 
 /**
- * Sync one user's mailbox. Concurrent calls for the same user share a single
- * in-flight sync. Status is reflected on the connection row for the UI.
+ * Sync one user's mailbox. The lock is a DB row, not in-memory state, so it
+ * holds correctly across separate serverless invocations. A "syncing" row
+ * older than STALE_SYNC_MS is treated as abandoned (crashed invocation) and
+ * reclaimed rather than wedging the account forever.
  */
 export async function syncUser(userId: string, opts: { full?: boolean } = {}): Promise<SyncSummary> {
-  const existing = locks.get(userId);
-  if (existing) return existing;
+  const existing = (
+    await db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).limit(1)
+  )[0];
+  if (!existing) throw new Error("Gmail is not connected.");
 
-  const run = (async (): Promise<SyncSummary> => {
-    const conn = (
-      await db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).limit(1)
-    )[0];
-    if (!conn) throw new Error("Gmail is not connected.");
-
+  const acquired = (
     await db
       .update(gmailConnections)
-      .set({ syncStatus: "syncing", syncError: null })
-      .where(eq(gmailConnections.id, conn.id));
-    try {
-      const gmail = gmailFor(conn);
-      const summary =
-        !conn.historyId || !conn.initialSyncDone || opts.full
-          ? await fullSync(gmail, conn)
-          : await incrementalSync(gmail, conn);
-      await db
-        .update(gmailConnections)
-        .set({ syncStatus: "idle" })
-        .where(eq(gmailConnections.id, conn.id));
-      return summary;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Sync failed.";
-      await db
-        .update(gmailConnections)
-        .set({ syncStatus: "error", syncError: message.slice(0, 500) })
-        .where(eq(gmailConnections.id, conn.id));
-      throw err;
-    } finally {
-      locks.delete(userId);
-      progress.delete(userId);
-    }
-  })();
+      .set({
+        syncStatus: "syncing",
+        syncError: null,
+        syncStartedAt: Date.now(),
+        syncProgressPhase: null,
+        syncProgressDone: null,
+        syncProgressTotal: null,
+      })
+      .where(
+        and(
+          eq(gmailConnections.id, existing.id),
+          or(
+            ne(gmailConnections.syncStatus, "syncing"),
+            isNull(gmailConnections.syncStartedAt),
+            lt(gmailConnections.syncStartedAt, Date.now() - STALE_SYNC_MS),
+          ),
+        ),
+      )
+      .returning()
+  )[0];
+  if (!acquired) {
+    throw new SyncInProgressError("A sync is already in progress for this account.");
+  }
 
-  locks.set(userId, run);
-  return run;
+  try {
+    const gmail = gmailFor(acquired);
+    const summary =
+      !acquired.historyId || !acquired.initialSyncDone || opts.full
+        ? await fullSync(gmail, acquired)
+        : await incrementalSync(gmail, acquired);
+    await db
+      .update(gmailConnections)
+      .set({ syncStatus: "idle", syncStartedAt: null })
+      .where(eq(gmailConnections.id, acquired.id));
+    return summary;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Sync failed.";
+    await db
+      .update(gmailConnections)
+      .set({ syncStatus: "error", syncError: message.slice(0, 500), syncStartedAt: null })
+      .where(eq(gmailConnections.id, acquired.id));
+    throw err;
+  }
 }
 
 /** Background sweep: incremental sync for every connected account. */
@@ -276,7 +298,17 @@ export async function syncAllUsers(): Promise<void> {
     try {
       await syncUser(conn.userId);
     } catch (err) {
-      console.error(`[vyay] background sync failed for user ${conn.userId}:`, err);
+      if (!(err instanceof SyncInProgressError)) {
+        console.error(`[vyay] background sync failed for user ${conn.userId}:`, err);
+      }
     }
   }
+}
+
+/** Cron sweep helper: connections ordered oldest-synced-first (never-synced first). */
+export async function connectionsOldestFirst(): Promise<{ userId: string }[]> {
+  return db
+    .select({ userId: gmailConnections.userId })
+    .from(gmailConnections)
+    .orderBy(sql`${gmailConnections.lastSyncAt} asc nulls first`);
 }
