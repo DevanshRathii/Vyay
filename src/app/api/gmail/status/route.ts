@@ -11,7 +11,9 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  const conn = db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).get();
+  const conn = (
+    await db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).limit(1)
+  )[0];
   return NextResponse.json({
     oauthConfigured: gmailOauthConfigured(),
     connected: Boolean(conn),

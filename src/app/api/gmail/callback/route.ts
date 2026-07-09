@@ -48,14 +48,14 @@ export async function GET(req: Request) {
     refreshToken: encrypt(tokens.refresh_token),
     expiryDate: tokens.expiry_date ?? null,
     historyId: null,
-    initialSyncDone: 0,
+    initialSyncDone: false,
     syncStatus: "idle",
     syncError: null,
   };
-  db.insert(gmailConnections)
+  await db
+    .insert(gmailConnections)
     .values(values)
-    .onConflictDoUpdate({ target: gmailConnections.userId, set: values })
-    .run();
+    .onConflictDoUpdate({ target: gmailConnections.userId, set: values });
 
   // Kick off the initial sync without blocking the redirect.
   syncUser(userId).catch((err) => console.error("[vyay] initial sync failed:", err));

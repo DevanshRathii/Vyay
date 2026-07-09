@@ -11,7 +11,9 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  const conn = db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).get();
+  const conn = (
+    await db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).limit(1)
+  )[0];
   if (!conn) return NextResponse.json({ error: "Gmail is not connected." }, { status: 400 });
 
   const full = new URL(req.url).searchParams.get("full") === "1";

@@ -10,6 +10,6 @@ export const dynamic = "force-dynamic";
 export async function POST() {
   const userId = await getUserId();
   if (!userId) return unauthorized();
-  db.delete(gmailConnections).where(eq(gmailConnections.userId, userId)).run();
+  await db.delete(gmailConnections).where(eq(gmailConnections.userId, userId));
   return NextResponse.json({ ok: true });
 }

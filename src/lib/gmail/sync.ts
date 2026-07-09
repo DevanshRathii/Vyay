@@ -74,15 +74,14 @@ function buildQuery(opts: { afterUnixSec?: number } = {}): string {
   return parts.join(" ");
 }
 
-/** Filter out message ids we've already stored (chunked to stay under SQLite's variable limit). */
-function unseenIds(userId: string, ids: string[]): string[] {
+/** Filter out message ids we've already stored (chunked to keep parameter counts sane). */
+async function unseenIds(userId: string, ids: string[]): Promise<string[]> {
   const seen = new Set<string>();
   for (const part of chunk(ids, 400)) {
-    const rows = db
+    const rows = await db
       .select({ id: transactions.gmailMessageId })
       .from(transactions)
-      .where(inArray(transactions.gmailMessageId, part))
-      .all();
+      .where(inArray(transactions.gmailMessageId, part));
     rows.forEach((r) => r.id && seen.add(r.id));
   }
   return ids.filter((id) => !seen.has(id));
@@ -93,8 +92,8 @@ async function fetchAndIngest(
   userId: string,
   ids: string[],
 ): Promise<{ inserted: number; skipped: number }> {
-  const ctx = loadCategorizerContext(userId);
-  const contactCtx = loadContactContext(userId);
+  const ctx = await loadCategorizerContext(userId);
+  const contactCtx = await loadContactContext(userId);
   let inserted = 0;
   let skipped = 0;
   let processed = 0;
@@ -102,7 +101,7 @@ async function fetchAndIngest(
   await mapLimit(ids, CONCURRENCY, async (id) => {
     const res = await withRetry(() => gmail.users.messages.get({ userId: "me", id, format: "full" }));
     const email = toEmailMessage(res.data);
-    const outcome = ingestEmail(userId, email, ctx, contactCtx);
+    const outcome = await ingestEmail(userId, email, ctx, contactCtx);
     if (outcome.status === "inserted") inserted++;
     else skipped++;
     processed++;
@@ -135,18 +134,18 @@ async function fullSync(
     progress.set(conn.userId, { phase: "listing", processed: ids.length, total: 0 });
   } while (pageToken && ids.length < maxTotal);
 
-  const fresh = unseenIds(conn.userId, ids.slice(0, maxTotal));
+  const fresh = await unseenIds(conn.userId, ids.slice(0, maxTotal));
   const { inserted, skipped } = await fetchAndIngest(gmail, conn.userId, fresh);
 
-  db.update(gmailConnections)
+  await db
+    .update(gmailConnections)
     .set({
       historyId: newHistoryId,
       lastSyncAt: Date.now(),
-      initialSyncDone: 1,
+      initialSyncDone: true,
       totalSynced: (conn.totalSynced ?? 0) + inserted,
     })
-    .where(eq(gmailConnections.id, conn.id))
-    .run();
+    .where(eq(gmailConnections.id, conn.id));
 
   return { fetched: fresh.length, inserted, skipped, mode: opts.afterUnixSec ? "fallback" : "initial" };
 }
@@ -188,7 +187,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
     throw err;
   }
 
-  const fresh = unseenIds(conn.userId, Array.from(new Set(ids)));
+  const fresh = await unseenIds(conn.userId, Array.from(new Set(ids)));
 
   // Cheap metadata pre-filter so a busy inbox doesn't trigger full fetches
   // for every personal email.
@@ -212,14 +211,14 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection): Pr
 
   const { inserted, skipped } = await fetchAndIngest(gmail, conn.userId, relevant);
 
-  db.update(gmailConnections)
+  await db
+    .update(gmailConnections)
     .set({
       historyId: latestHistoryId,
       lastSyncAt: Date.now(),
       totalSynced: (conn.totalSynced ?? 0) + inserted,
     })
-    .where(eq(gmailConnections.id, conn.id))
-    .run();
+    .where(eq(gmailConnections.id, conn.id));
 
   return { fetched: relevant.length, inserted, skipped, mode: "incremental" };
 }
@@ -233,30 +232,32 @@ export async function syncUser(userId: string, opts: { full?: boolean } = {}): P
   if (existing) return existing;
 
   const run = (async (): Promise<SyncSummary> => {
-    const conn = db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).get();
+    const conn = (
+      await db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).limit(1)
+    )[0];
     if (!conn) throw new Error("Gmail is not connected.");
 
-    db.update(gmailConnections)
+    await db
+      .update(gmailConnections)
       .set({ syncStatus: "syncing", syncError: null })
-      .where(eq(gmailConnections.id, conn.id))
-      .run();
+      .where(eq(gmailConnections.id, conn.id));
     try {
       const gmail = gmailFor(conn);
       const summary =
         !conn.historyId || !conn.initialSyncDone || opts.full
           ? await fullSync(gmail, conn)
           : await incrementalSync(gmail, conn);
-      db.update(gmailConnections)
+      await db
+        .update(gmailConnections)
         .set({ syncStatus: "idle" })
-        .where(eq(gmailConnections.id, conn.id))
-        .run();
+        .where(eq(gmailConnections.id, conn.id));
       return summary;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sync failed.";
-      db.update(gmailConnections)
+      await db
+        .update(gmailConnections)
         .set({ syncStatus: "error", syncError: message.slice(0, 500) })
-        .where(eq(gmailConnections.id, conn.id))
-        .run();
+        .where(eq(gmailConnections.id, conn.id));
       throw err;
     } finally {
       locks.delete(userId);
@@ -270,7 +271,7 @@ export async function syncUser(userId: string, opts: { full?: boolean } = {}): P
 
 /** Background sweep: incremental sync for every connected account. */
 export async function syncAllUsers(): Promise<void> {
-  const conns = db.select().from(gmailConnections).all();
+  const conns = await db.select().from(gmailConnections);
   for (const conn of conns) {
     try {
       await syncUser(conn.userId);

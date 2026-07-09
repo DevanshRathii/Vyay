@@ -38,7 +38,11 @@ export function gmailFor(conn: GmailConnection): gmail_v1.Gmail {
     if (tokens.refresh_token) update.refreshToken = encrypt(tokens.refresh_token);
     if (tokens.expiry_date) update.expiryDate = tokens.expiry_date;
     if (Object.keys(update).length > 0) {
-      db.update(gmailConnections).set(update).where(eq(gmailConnections.id, conn.id)).run();
+      // Event handler can't await — fire and forget, but never swallow silently.
+      db.update(gmailConnections)
+        .set(update)
+        .where(eq(gmailConnections.id, conn.id))
+        .catch((err: unknown) => console.error("[vyay] failed to persist refreshed Gmail tokens:", err));
     }
   });
   return gmail({ version: "v1", auth: client });
