@@ -139,20 +139,51 @@
   - **Green gates all pass**: typecheck clean; `npm run test` — 72/72
     (69 + 3 new lock tests); lint clean.
 
+- **Phase 6 (in progress).** Encryption verification (no code changes
+  needed): `src/lib/crypto.ts` `encrypt()`/`decrypt()` use AES-256-GCM
+  correctly — random 12-byte IV per call, auth tag stored alongside
+  ciphertext (`base64(iv).base64(tag).base64(ciphertext)`), key loaded from
+  `ENCRYPTION_KEY` (must be exactly 32 bytes base64 — validated, throws
+  otherwise). `gmailFor()` in `src/lib/gmail/client.ts` decrypts
+  `accessToken`/`refreshToken` only in-memory, immediately before building
+  the OAuth2 client for a Gmail API call; refreshed tokens are re-encrypted
+  before the fire-and-forget persist. Meets spec as originally planned —
+  confirmed by reading both files in full, not just from memory of earlier
+  planning.
+  - Trust UI: added an expandable "How is my data protected?" disclosure
+    next to the Connect Gmail button in `src/components/settings.tsx`
+    (`showTrustInfo` state, no new dependency — this codebase has no
+    tooltip/popover component, so it follows the existing inline-disclosure
+    pattern already used for the fresh-API-token reveal). Explains
+    AES-256-GCM at rest, in-memory-only decryption, read-only scope, and
+    that disconnecting removes the token immediately. typecheck/lint clean.
+  - **Outstanding — user action in progress**: generate + set NEW
+    production `ENCRYPTION_KEY`, `AUTH_SECRET`, `CRON_SECRET` via
+    `vercel env add <NAME> production`, values piped from
+    `node -e "console.log(require('crypto').randomBytes(32).toString('base64'|'hex'))"`
+    so they never appear in shell history, a process list, or this chat
+    (same protocol as the Supabase DB password). User confirmed they'd run
+    these themselves in their own terminal, not via the `!` in-session
+    prefix. **Confirm these are set (`vercel env ls`, or just proceed to
+    Phase 7 which will need them) before the first production deploy.**
+
 ## In progress
 
-- Nothing mid-flight. Repo is fully green.
+- Phase 6 mostly done — see above. Waiting on user confirmation that the 3
+  production secrets have been set on Vercel before treating Phase 6 as
+  fully closed and moving to Phase 7.
 
 ## Next
 
-- **Phase 6 — Encryption verification + trust UI** (`MIGRATION_PLAN.md`
-  §Phase 6): verify AES-256-GCM in `crypto.ts` meets spec (already
-  believed to, from earlier planning — just needs documenting, not
-  rewriting); generate NEW production `ENCRYPTION_KEY` + `AUTH_SECRET` +
-  `CRON_SECRET` (passwords/secrets must not pass through agent tool calls
-  — same protocol as the DB password: user generates/sets these
-  themselves); trust-UI tooltip near the Gmail connect button in
-  `settings.tsx` explaining tokens are encrypted at rest and read-only.
+- Confirm the 3 prod secrets landed, then **Phase 7 — Deployment**
+  (`MIGRATION_PLAN.md` §Phase 7): `package.json` build script →
+  `tsx migrate.ts && next build`; set remaining Vercel envs
+  (`DATABASE_URL`, `MIGRATE_DATABASE_URL`, `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, `APP_URL`, `SYNC_INTERVAL_MINUTES=0` — the DB
+  connection strings contain the DB password, so those two also go through
+  the user via `!`/their own terminal, not me); `vercel deploy --prod`;
+  reconnect Git auto-deploy (`vercel git connect`) only after that first
+  manual deploy succeeds; update README.
 - User-side prerequisite: `DATABASE_URL` + `MIGRATE_DATABASE_URL` in local
   `.env` — **done**, both set as of a previous session. Migrations have
   NOT yet been run against the real Supabase DB (`npx tsx migrate.ts`) —

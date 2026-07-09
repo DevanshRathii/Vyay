@@ -8,6 +8,7 @@ import {
   Mail,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Smartphone,
   Trash2,
   Unplug,
@@ -69,6 +70,7 @@ function GmailCard() {
   const [starting, setStarting] = useState(false);
   const [reparsing, setReparsing] = useState(false);
   const [reparseResult, setReparseResult] = useState<{ scanned: number; updated: number } | null>(null);
+  const [showTrustInfo, setShowTrustInfo] = useState(false);
 
   async function syncNow(full = false) {
     setStarting(true);
@@ -118,11 +120,30 @@ function GmailCard() {
               Connect the Gmail account that receives your bank and UPI transaction alerts. Vyay only requests
               read-only access and never modifies or sends email.
             </p>
-            <a href="/api/gmail/connect">
-              <Button>
-                <Mail className="h-4 w-4" /> Connect Gmail
-              </Button>
-            </a>
+            <div className="flex flex-wrap items-center gap-2">
+              <a href="/api/gmail/connect">
+                <Button>
+                  <Mail className="h-4 w-4" /> Connect Gmail
+                </Button>
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowTrustInfo((v) => !v)}
+                aria-expanded={showTrustInfo}
+                className="inline-flex items-center gap-1 text-[12px] text-muted underline decoration-dotted underline-offset-4 hover:text-fg"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" /> How is my data protected?
+              </button>
+            </div>
+            {showTrustInfo && (
+              <p className="rounded-xl bg-card-2 px-3.5 py-3 text-[12px] leading-relaxed text-muted">
+                Your Gmail access token is encrypted at rest with AES-256-GCM before it&apos;s stored — it&apos;s
+                decrypted only in memory, for the moment Vyay calls the Gmail API. Vyay requests the read-only Gmail
+                scope, so it can never send, delete, or modify your email, and it only ever reads messages that look
+                like bank or UPI transaction alerts. You can disconnect at any time from this page, which removes
+                the stored token immediately (your already-imported transactions are kept).
+              </p>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3.5">
