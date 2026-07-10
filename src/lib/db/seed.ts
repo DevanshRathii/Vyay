@@ -26,8 +26,8 @@ interface SeedTxn {
 }
 
 const MERCHANTS: SeedTxn[] = [
-  { merchant: "Swiggy", amount: 285, category: "Food & Dining", channel: "UPI", bank: "HDFC Bank", upiId: "swiggy@icici" },
-  { merchant: "Zomato", amount: 342, category: "Food & Dining", channel: "UPI", bank: "HDFC Bank", upiId: "zomato@paytm" },
+  { merchant: "Swiggy", amount: 285, category: "Food", channel: "UPI", bank: "HDFC Bank", upiId: "swiggy@icici" },
+  { merchant: "Zomato", amount: 342, category: "Food", channel: "UPI", bank: "HDFC Bank", upiId: "zomato@paytm" },
   { merchant: "Blinkit", amount: 456, category: "Groceries", channel: "UPI", bank: "ICICI Bank", upiId: "blinkit@ybl" },
   { merchant: "Zepto", amount: 389, category: "Groceries", channel: "UPI", bank: "ICICI Bank", upiId: "zepto@axl" },
   { merchant: "BigBasket", amount: 1240, category: "Groceries", channel: "Card", bank: "HDFC Bank", cardLast4: "4321" },
@@ -40,11 +40,11 @@ const MERCHANTS: SeedTxn[] = [
   { merchant: "Netflix", amount: 649, category: "Entertainment", channel: "Card", bank: "HDFC Bank", cardLast4: "4321" },
   { merchant: "Spotify", amount: 119, category: "Entertainment", channel: "UPI", bank: "ICICI Bank", upiId: "spotify@hdfcbank" },
   { merchant: "BookMyShow", amount: 560, category: "Entertainment", channel: "UPI", bank: "HDFC Bank", upiId: "bookmyshow@icici" },
-  { merchant: "Apollo Pharmacy", amount: 430, category: "Health", channel: "UPI", bank: "SBI", upiId: "apollopharmacy@ybl" },
-  { merchant: "Cult Fit", amount: 1200, category: "Health", channel: "Card", bank: "ICICI Bank", cardLast4: "2201" },
-  { merchant: "Airtel", amount: 599, category: "Bills & Utilities", channel: "UPI", bank: "HDFC Bank", upiId: "airtel@payu" },
-  { merchant: "Tata Power", amount: 1830, category: "Bills & Utilities", channel: "NetBanking", bank: "HDFC Bank" },
-  { merchant: "Jio", amount: 299, category: "Bills & Utilities", channel: "UPI", bank: "SBI", upiId: "jio@sbi" },
+  { merchant: "Apollo Pharmacy", amount: 430, category: "Healthcare", channel: "UPI", bank: "SBI", upiId: "apollopharmacy@ybl" },
+  { merchant: "Cult Fit", amount: 1200, category: "Healthcare", channel: "Card", bank: "ICICI Bank", cardLast4: "2201" },
+  { merchant: "Airtel", amount: 599, category: "Utilities", channel: "UPI", bank: "HDFC Bank", upiId: "airtel@payu" },
+  { merchant: "Tata Power", amount: 1830, category: "Utilities", channel: "NetBanking", bank: "HDFC Bank" },
+  { merchant: "Jio", amount: 299, category: "Utilities", channel: "UPI", bank: "SBI", upiId: "jio@sbi" },
   { merchant: "Ramesh Kirana Store", amount: 260, category: null, channel: "UPI", bank: "HDFC Bank", upiId: "rameshkirana@okhdfcbank" },
   { merchant: "Sharma Chai Wala", amount: 40, category: null, channel: "UPI", bank: "HDFC Bank", upiId: "sharmachai@paytm" },
   { merchant: "Petrol Pump HP", amount: 1500, category: "Transport", channel: "Card", bank: "Axis Bank", cardLast4: "7788" },
@@ -119,7 +119,7 @@ async function main() {
       referenceNumber: `N${Math.floor(Math.random() * 1e12)}`,
       emailSubject: "Credit alert: NEFT received in your account",
       confidence: 0.95,
-      categoryId: catId("Income"),
+      categoryId: catId("Salary"),
     });
     count++;
   }
@@ -144,7 +144,7 @@ async function main() {
         referenceNumber: "412345678901",
         emailSubject: "You have done a UPI txn of Rs 499.00",
         confidence: 0.9,
-        categoryId: catId("Food & Dining"),
+        categoryId: catId("Food"),
       })
       .returning()
   )[0];
@@ -163,7 +163,7 @@ async function main() {
     referenceNumber: "412345678902",
     emailSubject: "UPI transaction alert",
     confidence: 0.85,
-    categoryId: catId("Food & Dining"),
+    categoryId: catId("Food"),
     duplicateOfId: base.id,
   });
   count += 2;
