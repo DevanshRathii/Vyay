@@ -51,7 +51,9 @@ function shouldWriteProgress(processed: number, total: number): boolean {
   return processed === total || processed % PROGRESS_WRITE_EVERY === 0;
 }
 
-const CONCURRENCY = 4;
+// Gmail's per-user quota (250 units/s; messages.get costs 5 units) allows far
+// more than this sustained — headroom is intentional, not a bottleneck.
+const CONCURRENCY = 10;
 
 /** Retry Gmail API calls on rate-limit / transient server errors. */
 async function withRetry<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {

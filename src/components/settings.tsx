@@ -15,9 +15,14 @@ import {
   Wand2,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
+
+// A large initial sync can need several passes under Vercel's 300s function
+// ceiling. Auto-continue this many times before asking the user to resume
+// manually, so "5 clicks" usually becomes "1 click, watch the bar".
+const AUTO_CONTINUE_LIMIT = 6;
 
 interface GmailStatus {
   oauthConfigured: boolean;
@@ -71,6 +76,9 @@ function GmailCard() {
   const [reparsing, setReparsing] = useState(false);
   const [reparseResult, setReparseResult] = useState<{ scanned: number; updated: number } | null>(null);
   const [showTrustInfo, setShowTrustInfo] = useState(false);
+  const [autoContinues, setAutoContinues] = useState(0);
+  const [autoContinueExhausted, setAutoContinueExhausted] = useState(false);
+  const prevSyncStatus = useRef<GmailStatus["syncStatus"]>(undefined);
 
   async function syncNow(full = false) {
     setStarting(true);
@@ -78,6 +86,35 @@ function GmailCard() {
     setStarting(false);
     mutate();
   }
+
+  function resumeSync() {
+    setAutoContinues(0);
+    setAutoContinueExhausted(false);
+    syncNow(false);
+  }
+
+  // When a sync pass finishes (syncing -> idle) but the initial sync still
+  // isn't done, kick off the next pass automatically instead of making the
+  // user click "Sync now" again.
+  useEffect(() => {
+    if (!data) return;
+    const wasSyncing = prevSyncStatus.current === "syncing";
+    prevSyncStatus.current = data.syncStatus;
+    if (data.initialSyncDone) {
+      setAutoContinues(0);
+      setAutoContinueExhausted(false);
+      return;
+    }
+    if (wasSyncing && data.syncStatus === "idle") {
+      if (autoContinues < AUTO_CONTINUE_LIMIT) {
+        setAutoContinues((c) => c + 1);
+        syncNow(false);
+      } else {
+        setAutoContinueExhausted(true);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   async function disconnect() {
     if (!confirm("Disconnect Gmail? Your imported transactions are kept.")) return;
@@ -195,7 +232,19 @@ function GmailCard() {
             {data.syncStatus === "error" && data.syncError && (
               <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[12px] text-negative">{data.syncError}</p>
             )}
-            {!data.initialSyncDone && !syncing && (
+            {!data.initialSyncDone && !syncing && autoContinueExhausted && (
+              <p className="rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px] text-muted">
+                This sync needs another pass to finish importing everything.{" "}
+                <button
+                  type="button"
+                  className="font-medium text-accent underline underline-offset-2"
+                  onClick={resumeSync}
+                >
+                  Resume sync
+                </button>
+              </p>
+            )}
+            {!data.initialSyncDone && !syncing && !autoContinueExhausted && (
               <p className="rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px] text-muted">
                 The first sync hasn&apos;t completed yet — hit “Sync now” to start importing.
               </p>

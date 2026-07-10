@@ -115,8 +115,14 @@ export const PROVIDERS: Provider[] = [
     id: "amazonpay",
     name: "Amazon Pay",
     channelHint: "Wallet",
+    // `senders` stays broad (any amazon.in/.com sender) for tagging already-
+    // fetched messages, but `queryDomains` scopes the *sync* query to the
+    // actual payments sender — "amazon.in" alone pulls every order/shipping/
+    // marketing email into the full-fetch set for the entire lookback
+    // window, only for classifyEmail() to reject nearly all of them after an
+    // expensive full-body fetch.
     senders: [/amazonpay|payments.*amazon\.(in|com)|amazon\.(in|com)/i],
-    queryDomains: ["amazon.in"],
+    queryDomains: ["payments@amazon.in", "payments@amazon.com"],
   },
 ];
 
