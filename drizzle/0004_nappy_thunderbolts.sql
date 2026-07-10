@@ -1,0 +1,1 @@
+ALTER TABLE "gmail_connections" ADD COLUMN "selected_providers" text;

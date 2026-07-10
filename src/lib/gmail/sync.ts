@@ -78,8 +78,9 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
 /** Fixed anchor for a brand-new connection's first sync: 1-Jan-2026, 00:00 IST. */
 const INITIAL_SYNC_START_UNIX_SEC = Math.floor((Date.UTC(2026, 0, 1) - 5.5 * 60 * 60 * 1000) / 1000);
 
-function buildQuery(opts: { afterUnixSec?: number } = {}): string {
-  const parts = [senderQuery()];
+function buildQuery(conn: GmailConnection, opts: { afterUnixSec?: number } = {}): string {
+  const selectedProviders = conn.selectedProviders ? (JSON.parse(conn.selectedProviders) as string[]) : null;
+  const parts = [senderQuery(selectedProviders)];
   if (opts.afterUnixSec) {
     parts.push(`after:${opts.afterUnixSec}`);
   } else if (process.env.SYNC_LOOKBACK_MONTHS) {
@@ -149,7 +150,7 @@ async function fullSync(
   const profile = await withRetry(() => gmail.users.getProfile({ userId: "me" }));
   const newHistoryId = profile.data.historyId ?? null;
 
-  const q = buildQuery(opts);
+  const q = buildQuery(conn, opts);
   const maxTotal = Number(process.env.SYNC_MAX_INITIAL_MESSAGES ?? 3000);
   const ids: string[] = [];
   let pageToken: string | undefined;

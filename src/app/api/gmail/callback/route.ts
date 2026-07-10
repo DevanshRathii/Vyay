@@ -28,6 +28,19 @@ export async function GET(req: Request) {
   const verified = verifyState(state);
   if (!verified || verified.split(":")[0] !== userId) return fail("State verification failed.");
 
+  // Provider selection travels through the OAuth round-trip inside `state`
+  // (see connect/route.ts) since Google doesn't preserve arbitrary params.
+  const providersSegment = verified.split(":")[2];
+  const selectedProviders =
+    !providersSegment || providersSegment === "all"
+      ? null
+      : JSON.stringify(
+          Buffer.from(providersSegment, "base64url")
+            .toString("utf8")
+            .split(",")
+            .filter(Boolean),
+        );
+
   const client = oauthClient();
   const { tokens } = await client.getToken(code);
   if (!tokens.access_token || !tokens.refresh_token) {
@@ -53,6 +66,7 @@ export async function GET(req: Request) {
     initialSyncDone: false,
     syncStatus: "idle",
     syncError: null,
+    selectedProviders,
   };
   await db
     .insert(gmailConnections)

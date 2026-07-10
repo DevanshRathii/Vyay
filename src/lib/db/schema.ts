@@ -57,6 +57,9 @@ export const gmailConnections = pgTable("gmail_connections", {
   syncProgressTotal: integer("sync_progress_total"),
   /** running counters for the settings page */
   totalSynced: integer("total_synced").notNull().default(0),
+  /** JSON array of provider ids (src/lib/parsing/providers.ts) chosen at
+   *  connect time to narrow the sync query; null means all providers. */
+  selectedProviders: text("selected_providers"),
   createdAt: now(),
 });
 
