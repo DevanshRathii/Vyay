@@ -24,7 +24,31 @@ export async function GET(req: Request) {
   const to = toParam !== null ? Number(toParam) : now;
   const yearAgo = now - 366 * 24 * 3600 * 1000;
 
-  const rows = await db
+  // Slice-and-dice filters — drilling into a category/channel/merchant from
+  // the dashboard re-requests this endpoint scoped to that slice, so every
+  // aggregate below (stat cards, trend charts, the other two panels) stays
+  // consistent with what's on screen rather than only filtering one panel.
+  const filterCategory = params.get("categoryId");
+  const filterChannel = params.get("channel");
+  const filterMerchant = params.get("merchant");
+
+  type Row = {
+    occurredAt: number;
+    amountPaise: number;
+    direction: string;
+    categoryId: string | null;
+    channel: string | null;
+    merchant: string | null;
+    merchantRaw: string | null;
+  };
+  const matchesFilters = (r: Row) => {
+    if (filterCategory !== null && (r.categoryId ?? "__none__") !== filterCategory) return false;
+    if (filterChannel !== null && (r.channel ?? "Other") !== filterChannel) return false;
+    if (filterMerchant !== null && (r.merchant ?? r.merchantRaw ?? "unknown") !== filterMerchant) return false;
+    return true;
+  };
+
+  const allRows = await db
     .select({
       occurredAt: transactions.occurredAt,
       amountPaise: transactions.amountPaise,
@@ -47,13 +71,48 @@ export async function GET(req: Request) {
   const cats = await db.select().from(categories).where(eq(categories.userId, userId));
   const catById = new Map(cats.map((c) => [c.id, c]));
 
+  const rows = allRows.filter(matchesFilters);
   const inRange = rows.filter((r) => r.occurredAt >= from && r.occurredAt <= to);
+
+  // Previous period, same duration and same filters, for the trend badges on
+  // the stat cards. Skipped for "all time" (from=0 has no meaningful "before").
+  let previous: { debit: number; credit: number } | null = null;
+  if (from > 0) {
+    const duration = to - from;
+    const prevFrom = Math.max(0, from - duration);
+    const prevRows = await db
+      .select({
+        occurredAt: transactions.occurredAt,
+        amountPaise: transactions.amountPaise,
+        direction: transactions.direction,
+        categoryId: transactions.categoryId,
+        channel: transactions.channel,
+        merchant: transactions.merchantNormalized,
+        merchantRaw: transactions.merchant,
+      })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.userId, userId),
+          isNull(transactions.deletedAt),
+          gte(transactions.occurredAt, prevFrom),
+          lte(transactions.occurredAt, from),
+        ),
+      );
+    let pDebit = 0;
+    let pCredit = 0;
+    for (const r of prevRows.filter(matchesFilters)) {
+      if (r.direction === "debit") pDebit += r.amountPaise;
+      else pCredit += r.amountPaise;
+    }
+    previous = { debit: pDebit, credit: pCredit };
+  }
 
   let debit = 0;
   let credit = 0;
   const byCategory = new Map<string, number>();
   const byChannel = new Map<string, number>();
-  const byMerchant = new Map<string, { label: string; total: number; count: number }>();
+  const byMerchant = new Map<string, { key: string; label: string; total: number; count: number }>();
   const byDay = new Map<string, { debit: number; credit: number }>();
 
   for (const r of inRange) {
@@ -62,7 +121,7 @@ export async function GET(req: Request) {
       byCategory.set(r.categoryId ?? "__none__", (byCategory.get(r.categoryId ?? "__none__") ?? 0) + r.amountPaise);
       byChannel.set(r.channel ?? "Other", (byChannel.get(r.channel ?? "Other") ?? 0) + r.amountPaise);
       const mKey = r.merchant ?? r.merchantRaw ?? "unknown";
-      const m = byMerchant.get(mKey) ?? { label: r.merchantRaw ?? mKey, total: 0, count: 0 };
+      const m = byMerchant.get(mKey) ?? { key: mKey, label: r.merchantRaw ?? mKey, total: 0, count: 0 };
       m.total += r.amountPaise;
       m.count += 1;
       byMerchant.set(mKey, m);
@@ -87,6 +146,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     totals: { debit, credit, count: inRange.length, net: credit - debit },
+    previous,
     byCategory: Array.from(byCategory.entries())
       .map(([id, total]) => ({
         id,

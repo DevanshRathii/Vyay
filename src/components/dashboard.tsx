@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownLeft, ArrowUpRight, Inbox, ReceiptText } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Inbox, ReceiptText, TrendingDown, TrendingUp, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   Area,
@@ -14,17 +14,34 @@ import {
   YAxis,
 } from "recharts";
 import useSWR from "swr";
-import { Card, CardHeader, Empty, Select, Spinner } from "@/components/ui";
-import { formatINR } from "@/lib/utils";
+import { Button, Card, CardHeader, Empty, Select, Spinner } from "@/components/ui";
+import { cn, formatINR } from "@/lib/utils";
 
 interface Analytics {
   totals: { debit: number; credit: number; count: number; net: number };
+  previous: { debit: number; credit: number } | null;
   byCategory: Array<{ id: string; name: string; color: string; total: number }>;
   byChannel: Array<{ channel: string; total: number }>;
-  topMerchants: Array<{ label: string; total: number; count: number }>;
+  topMerchants: Array<{ key: string; label: string; total: number; count: number }>;
   byDay: Array<{ date: string; debit: number; credit: number }>;
   byMonth: Array<{ month: string; debit: number; credit: number }>;
 }
+
+interface Slice {
+  categoryId: string | null;
+  categoryName: string | null;
+  channel: string | null;
+  merchantKey: string | null;
+  merchantLabel: string | null;
+}
+
+const EMPTY_SLICE: Slice = {
+  categoryId: null,
+  categoryName: null,
+  channel: null,
+  merchantKey: null,
+  merchantLabel: null,
+};
 
 const RANGES = [
   { label: "This month", value: "month" },
@@ -62,12 +79,33 @@ function rangeToMs(value: string): { from: number; to: number } {
   }
 }
 
+/** % change vs. the immediately preceding period of equal length. Rises in spend are shown as "worse" (negative tone) regardless of raw sign, since more spend is the unwanted direction. */
+function DeltaBadge({ current, prior, invert }: { current: number; prior: number; invert?: boolean }) {
+  if (prior === 0) return null;
+  const pct = Math.round(((current - prior) / prior) * 100);
+  if (pct === 0) return null;
+  const rose = pct > 0;
+  const good = invert ? !rose : rose;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 text-[11px] font-medium",
+        good ? "text-positive" : "text-negative",
+      )}
+    >
+      {rose ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+      {Math.abs(pct)}%
+    </span>
+  );
+}
+
 function StatCard({
   label,
   value,
   compactValue,
   icon,
   tone,
+  delta,
 }: {
   label: string;
   value: string;
@@ -75,6 +113,7 @@ function StatCard({
   compactValue?: string;
   icon: React.ReactNode;
   tone?: "positive" | "negative";
+  delta?: React.ReactNode;
 }) {
   return (
     <Card className="flex items-center gap-3.5 p-4">
@@ -82,7 +121,10 @@ function StatCard({
         {icon}
       </span>
       <div className="min-w-0">
-        <p className="text-[12px] font-medium text-muted">{label}</p>
+        <p className="flex items-center gap-1.5 text-[12px] font-medium text-muted">
+          {label}
+          {delta}
+        </p>
         <p
           className={
             "truncate text-lg font-semibold tracking-tight " +
@@ -103,6 +145,18 @@ function StatCard({
   );
 }
 
+function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <button
+      onClick={onClear}
+      className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 py-1 pl-3 pr-2 text-[12px] font-medium text-accent"
+    >
+      {label}
+      <X className="h-3 w-3" />
+    </button>
+  );
+}
+
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color?: string }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
@@ -119,10 +173,38 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 
 export function Dashboard() {
   const [range, setRange] = useState<string>("month");
+  const [slice, setSlice] = useState<Slice>(EMPTY_SLICE);
   const { from, to } = useMemo(() => rangeToMs(range), [range]);
-  const { data, isLoading } = useSWR<Analytics>(`/api/analytics?from=${from}&to=${to}`);
 
-  if (isLoading || !data) {
+  const analyticsUrl = useMemo(() => {
+    const p = new URLSearchParams({ from: String(from), to: String(to) });
+    if (slice.categoryId !== null) p.set("categoryId", slice.categoryId);
+    if (slice.channel !== null) p.set("channel", slice.channel);
+    if (slice.merchantKey !== null) p.set("merchant", slice.merchantKey);
+    return `/api/analytics?${p.toString()}`;
+  }, [from, to, slice]);
+  const { data, isLoading, isValidating } = useSWR<Analytics>(analyticsUrl, { keepPreviousData: true });
+
+  const sliceActive = slice.categoryId !== null || slice.channel !== null || slice.merchantKey !== null;
+  const ledgerHref = useMemo(() => {
+    const p = new URLSearchParams();
+    if (slice.categoryId !== null) p.set("category", slice.categoryId === "__none__" ? "uncategorized" : slice.categoryId);
+    if (slice.channel !== null) p.set("channel", slice.channel);
+    if (slice.merchantKey !== null) p.set("q", slice.merchantLabel ?? slice.merchantKey);
+    return `/ledger?${p.toString()}`;
+  }, [slice]);
+
+  function toggleCategory(id: string, name: string) {
+    setSlice((s) => (s.categoryId === id ? { ...s, categoryId: null, categoryName: null } : { ...s, categoryId: id, categoryName: name }));
+  }
+  function toggleChannel(channel: string) {
+    setSlice((s) => (s.channel === channel ? { ...s, channel: null } : { ...s, channel }));
+  }
+  function toggleMerchant(key: string, label: string) {
+    setSlice((s) => (s.merchantKey === key ? { ...s, merchantKey: null, merchantLabel: null } : { ...s, merchantKey: key, merchantLabel: label }));
+  }
+
+  if ((isLoading && !data) || !data) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Spinner className="h-6 w-6" />
@@ -130,7 +212,7 @@ export function Dashboard() {
     );
   }
 
-  const { totals } = data;
+  const { totals, previous } = data;
   const maxCat = data.byCategory[0]?.total ?? 1;
   const maxMerchant = data.topMerchants[0]?.total ?? 1;
   const monthData = data.byMonth.map((m) => ({
@@ -149,14 +231,45 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
-        <Select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Date range">
-          {RANGES.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </Select>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {slice.categoryName !== null && (
+            <FilterChip
+              label={`Category: ${slice.categoryName}`}
+              onClear={() => setSlice((s) => ({ ...s, categoryId: null, categoryName: null }))}
+            />
+          )}
+          {slice.channel !== null && (
+            <FilterChip label={`Channel: ${slice.channel}`} onClear={() => setSlice((s) => ({ ...s, channel: null }))} />
+          )}
+          {slice.merchantLabel !== null && (
+            <FilterChip
+              label={`Merchant: ${slice.merchantLabel}`}
+              onClear={() => setSlice((s) => ({ ...s, merchantKey: null, merchantLabel: null }))}
+            />
+          )}
+          {sliceActive && (
+            <button onClick={() => setSlice(EMPTY_SLICE)} className="text-[12px] font-medium text-muted hover:text-fg">
+              Clear all
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {sliceActive && !empty && (
+            <a href={ledgerHref}>
+              <Button variant="secondary" size="sm">
+                View in Ledger
+              </Button>
+            </a>
+          )}
+          <Select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Date range">
+            {RANGES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
 
       <div data-tour="overview-stats" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -166,6 +279,7 @@ export function Dashboard() {
           compactValue={formatINR(totals.debit, { compact: true })}
           tone="negative"
           icon={<ArrowUpRight className="h-5 w-5" />}
+          delta={previous && <DeltaBadge current={totals.debit} prior={previous.debit} invert />}
         />
         <StatCard
           label="Received"
@@ -173,12 +287,14 @@ export function Dashboard() {
           compactValue={formatINR(totals.credit, { compact: true })}
           tone="positive"
           icon={<ArrowDownLeft className="h-5 w-5" />}
+          delta={previous && <DeltaBadge current={totals.credit} prior={previous.credit} />}
         />
         <StatCard
           label="Net"
           value={formatINR(totals.net)}
           compactValue={formatINR(totals.net, { compact: true })}
           icon={<ReceiptText className="h-5 w-5" />}
+          delta={previous && <DeltaBadge current={totals.net} prior={previous.credit - previous.debit} />}
         />
         <StatCard label="Transactions" value={String(totals.count)} icon={<Inbox className="h-5 w-5" />} />
       </div>
@@ -187,15 +303,40 @@ export function Dashboard() {
         <Card>
           <Empty
             icon={<Inbox className="h-8 w-8" />}
-            title="No transactions in this range"
-            hint="Connect Gmail in Settings and run a sync, or try a wider date range."
-          />
+            title={sliceActive ? "No transactions match this filter" : "No transactions in this range"}
+            hint={
+              sliceActive
+                ? "Try clearing a filter or widening the date range."
+                : "Connect Gmail in Settings and run a sync, or try a wider date range."
+            }
+          >
+            {sliceActive && (
+              <Button variant="secondary" size="sm" onClick={() => setSlice(EMPTY_SLICE)} className="mt-1">
+                Clear filters
+              </Button>
+            )}
+          </Empty>
         </Card>
       ) : (
         <>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className={cn("grid gap-4 lg:grid-cols-2", isValidating && "opacity-60 transition-opacity")}>
             <Card>
-              <CardHeader title="Daily activity" subtitle="Debits and credits in the selected range" />
+              <CardHeader
+                title="Daily activity"
+                subtitle="Debits and credits in the selected range"
+                action={
+                  <div className="flex items-center gap-3 text-[11px] font-medium text-muted">
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full" style={{ background: "var(--negative)" }} />
+                      Spent
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full" style={{ background: "var(--positive)" }} />
+                      Received
+                    </span>
+                  </div>
+                }
+              />
               <div className="h-56 px-2 pb-4 pt-2">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={dayData} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
@@ -239,12 +380,19 @@ export function Dashboard() {
             </Card>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className={cn("grid gap-4 lg:grid-cols-3", isValidating && "opacity-60 transition-opacity")}>
             <Card>
-              <CardHeader title="By category" subtitle="Where the money went" />
+              <CardHeader title="By category" subtitle="Click a category to slice the whole dashboard" />
               <div className="flex flex-col gap-2.5 px-5 pb-5 pt-2">
                 {data.byCategory.slice(0, 8).map((c) => (
-                  <div key={c.id}>
+                  <button
+                    key={c.id}
+                    onClick={() => toggleCategory(c.id, c.name)}
+                    className={cn(
+                      "-mx-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-card-2",
+                      slice.categoryId === c.id && "bg-card-2 ring-1 ring-accent/40",
+                    )}
+                  >
                     <div className="mb-1 flex items-baseline justify-between text-[13px]">
                       <span className="flex items-center gap-2 font-medium">
                         <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} />
@@ -255,16 +403,23 @@ export function Dashboard() {
                     <div className="h-1.5 overflow-hidden rounded-full bg-card-2">
                       <div className="h-full rounded-full" style={{ width: `${Math.max(3, (c.total / maxCat) * 100)}%`, background: c.color }} />
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </Card>
 
             <Card>
-              <CardHeader title="Top merchants" subtitle="Biggest recipients this period" />
+              <CardHeader title="Top merchants" subtitle="Click a merchant to slice the whole dashboard" />
               <div className="flex flex-col px-5 pb-5 pt-2">
-                {data.topMerchants.slice(0, 8).map((m, i) => (
-                  <div key={m.label + i} className="flex items-center justify-between border-b border-line py-2 text-[13px] last:border-0">
+                {data.topMerchants.slice(0, 8).map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => toggleMerchant(m.key, m.label)}
+                    className={cn(
+                      "-mx-2 flex items-center justify-between rounded-lg border-b border-line px-2 py-2 text-left text-[13px] transition-colors last:border-0 hover:bg-card-2",
+                      slice.merchantKey === m.key && "bg-card-2 ring-1 ring-accent/40",
+                    )}
+                  >
                     <div className="min-w-0">
                       <p className="truncate font-medium capitalize">{m.label}</p>
                       <p className="text-[12px] text-muted">{m.count} txn{m.count > 1 ? "s" : ""}</p>
@@ -275,23 +430,30 @@ export function Dashboard() {
                         <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(4, (m.total / maxMerchant) * 100)}%` }} />
                       </span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </Card>
 
             <Card>
-              <CardHeader title="By channel" subtitle="UPI, cards, transfers" />
+              <CardHeader title="By channel" subtitle="Click a channel to slice the whole dashboard" />
               <div className="flex flex-col px-5 pb-5 pt-2">
                 {data.byChannel.map((ch) => {
                   const pct = totals.debit ? Math.round((ch.total / totals.debit) * 100) : 0;
                   return (
-                    <div key={ch.channel} className="flex items-center justify-between border-b border-line py-2.5 text-[13px] last:border-0">
+                    <button
+                      key={ch.channel}
+                      onClick={() => toggleChannel(ch.channel)}
+                      className={cn(
+                        "-mx-2 flex items-center justify-between rounded-lg border-b border-line px-2 py-2.5 text-left text-[13px] transition-colors last:border-0 hover:bg-card-2",
+                        slice.channel === ch.channel && "bg-card-2 ring-1 ring-accent/40",
+                      )}
+                    >
                       <span className="font-medium">{ch.channel}</span>
                       <span className="tabular-nums text-muted">
                         {formatINR(ch.total)} <span className="ml-1 text-[11px]">({pct}%)</span>
                       </span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>

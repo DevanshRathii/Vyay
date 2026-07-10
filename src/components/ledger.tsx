@@ -79,10 +79,13 @@ function fmtTime(ms: number) {
 }
 
 function LedgerInner() {
-  const initialCategory = useSearchParams().get("category") ?? "";
-  const [q, setQ] = useState("");
+  const initialParams = useSearchParams();
+  const initialCategory = initialParams.get("category") ?? "";
+  const initialChannel = initialParams.get("channel") ?? "";
+  const initialQ = initialParams.get("q") ?? "";
+  const [q, setQ] = useState(initialQ);
   const [category, setCategory] = useState(initialCategory);
-  const [channel, setChannel] = useState("");
+  const [channel, setChannel] = useState(initialChannel);
   const [direction, setDirection] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
   const [lowConfidence, setLowConfidence] = useState(false);
