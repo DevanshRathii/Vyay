@@ -7,6 +7,6 @@ export const metadata = { title: "Sign in" };
 
 export default async function LoginPage() {
   const session = await auth();
-  if (session?.user) redirect("/");
+  if (session?.user) redirect(session.user.approved ? "/" : "/pending-approval");
   return <LoginForm googleEnabled={googleLoginEnabled} />;
 }

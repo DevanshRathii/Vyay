@@ -28,6 +28,10 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name"),
   image: text("image"),
+  /** Gate on first Google sign-in — the app owner approves new users manually
+   *  (see ADMIN_EMAIL / ADMIN_NOTIFY_WEBHOOK_URL). Existing rows are
+   *  grandfathered to true by the migration that adds this column. */
+  approved: boolean("approved").notNull().default(false),
   createdAt: now(),
 });
 
@@ -203,6 +207,20 @@ export const shortcutEvents = pgTable(
   (t) => [index("shortcut_user_idx").on(t.userId, t.status)],
 );
 
+export const feedbackMessages = pgTable(
+  "feedback_messages",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    message: text("message").notNull(),
+    resolved: boolean("resolved").notNull().default(false),
+    createdAt: now(),
+  },
+  (t) => [index("feedback_user_idx").on(t.userId)],
+);
+
 export type User = typeof users.$inferSelect;
 export type GmailConnection = typeof gmailConnections.$inferSelect;
 export type Category = typeof categories.$inferSelect;
@@ -211,3 +229,4 @@ export type MerchantRule = typeof merchantRules.$inferSelect;
 export type ApiToken = typeof apiTokens.$inferSelect;
 export type ShortcutEvent = typeof shortcutEvents.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
+export type FeedbackMessage = typeof feedbackMessages.$inferSelect;

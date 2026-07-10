@@ -62,7 +62,7 @@ async function main() {
     await db.delete(users).where(eq(users.id, existing.id));
   }
 
-  const user = (await db.insert(users).values({ email, name: "Demo User" }).returning())[0];
+  const user = (await db.insert(users).values({ email, name: "Demo User", approved: true }).returning())[0];
 
   await ensureDefaultCategories(user.id);
   const cats = await db.select().from(categories).where(eq(categories.userId, user.id));

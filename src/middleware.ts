@@ -9,6 +9,9 @@ export default auth((req) => {
     url.searchParams.set("next", req.nextUrl.pathname);
     return Response.redirect(url);
   }
+  if (!req.auth.user.approved) {
+    return Response.redirect(new URL("/pending-approval", req.nextUrl));
+  }
 });
 
 // Pages that require a signed-in user. API routes enforce auth themselves.
