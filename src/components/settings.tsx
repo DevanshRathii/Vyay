@@ -301,7 +301,12 @@ function GmailCard() {
                 The first sync hasn&apos;t completed yet — hit “Sync now” to start importing.
               </p>
             )}
-            {reparseResult && (
+            {reparsing && (
+              <p className="flex items-center gap-1.5 rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px] text-muted">
+                <Spinner className="h-3 w-3" /> Re-parsing your transactions…
+              </p>
+            )}
+            {!reparsing && reparseResult && (
               <p className="rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px] text-muted">
                 Re-parsed {reparseResult.scanned} transaction{reparseResult.scanned === 1 ? "" : "s"} — updated{" "}
                 {reparseResult.updated}. Category and notes you&apos;ve already set are never overwritten.

@@ -300,12 +300,23 @@ export function Dialog({
 
 // ── Empty state ─────────────────────────────────────────────────────────────
 
-export function Empty({ icon, title, hint }: { icon?: React.ReactNode; title: string; hint?: string }) {
+export function Empty({
+  icon,
+  title,
+  hint,
+  children,
+}: {
+  icon?: React.ReactNode;
+  title: string;
+  hint?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
       {icon && <div className="text-muted">{icon}</div>}
       <p className="text-sm font-medium">{title}</p>
       {hint && <p className="max-w-sm text-[13px] text-muted">{hint}</p>}
+      {children}
     </div>
   );
 }

@@ -73,3 +73,13 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
+
+/* <option> elements in a <select>'s native dropdown popup ignore almost all
+   CSS except background-color/color — Tailwind classes on the closed
+   <select> (bg-card/text-fg) don't reach them, so without this the open
+   dropdown falls back to the browser's default (often light) colors
+   regardless of theme, reading as broken/low-contrast in dark mode. */
+select option {
+  background-color: var(--card);
+  color: var(--fg);
+}
