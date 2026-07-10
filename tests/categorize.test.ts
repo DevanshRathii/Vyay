@@ -88,3 +88,33 @@ describe("categorize — layered rules (§2 regressions)", () => {
     expect(result.categoryId).toBeNull();
   });
 });
+
+describe("categorize — real production gaps (found via DB investigation)", () => {
+  it("categorizes 'Das Food' as Food via the generic 'food' keyword (real fixture, 35 uncategorized rows in one inbox)", async () => {
+    const ctx = await loadCategorizerContext(userId);
+    const result = categorize(ctx, { merchant: "Das Food", merchantNormalized: "das food", upiId: undefined, subject: undefined });
+    expect(ctx.categoriesById.get(result.categoryId!)?.name).toBe("Food");
+    expect(result.source).toBe("generic");
+  });
+
+  it("categorizes 'Accent on Health' as Healthcare via the generic 'health' keyword (real fixture, 26 uncategorized rows)", async () => {
+    const ctx = await loadCategorizerContext(userId);
+    const result = categorize(ctx, { merchant: "Accent on Health", merchantNormalized: "accent on health", upiId: undefined, subject: undefined });
+    expect(ctx.categoriesById.get(result.categoryId!)?.name).toBe("Healthcare");
+    expect(result.source).toBe("generic");
+  });
+
+  it("categorizes 'Apple Media Services' as Subscriptions (real Apple billing descriptor, 16 uncategorized rows — didn't match the existing 'apple services' pattern)", async () => {
+    const ctx = await loadCategorizerContext(userId);
+    const result = categorize(ctx, { merchant: "Apple Media Services", merchantNormalized: "apple media services", upiId: undefined, subject: undefined });
+    expect(ctx.categoriesById.get(result.categoryId!)?.name).toBe("Subscriptions");
+    expect(result.source).toBe("brand");
+  });
+
+  it("categorizes a YouTube charge as Subscriptions", async () => {
+    const ctx = await loadCategorizerContext(userId);
+    const result = categorize(ctx, { merchant: "YouTube", merchantNormalized: "youtube", upiId: undefined, subject: undefined });
+    expect(ctx.categoriesById.get(result.categoryId!)?.name).toBe("Subscriptions");
+    expect(result.source).toBe("brand");
+  });
+});

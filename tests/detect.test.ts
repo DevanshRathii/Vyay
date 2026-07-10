@@ -58,4 +58,10 @@ describe("classifyEmail — rejects non-transactions", () => {
   it("pure promo", () =>
     no("Get flat ₹100 cashback!", "Shop now and get flat Rs 100 cashback on orders above Rs 999. Limited time offer!"));
   it("no amount at all", () => no("Hello", "Just checking in about lunch tomorrow.", "no-amount"));
+  it("EMI-conversion marketing offer referencing a past transaction (real SBI Card fixture — was 31 of 538 flagged rows in one inbox)", () =>
+    no(
+      "Enjoy ZERO Processing FEE on your Flexipay Bookings!",
+      "Enjoy ZERO Processing Fee* on converting your transaction of ₹8,554.02 done on 22MAR2026 into Flexipay EMIs for 24 months or more. For all other tenures, the Processing Fee will be 1% or ₹2,000, whichever is less.",
+      "emi-conversion-offer",
+    ));
 });
