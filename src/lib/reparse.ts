@@ -4,8 +4,8 @@ import { transactions } from "@/lib/db/schema";
 import { categorize, loadCategorizerContext } from "@/lib/categorize";
 import { loadContactContext, matchContact } from "@/lib/contacts/match";
 import { collapseWhitespace } from "@/lib/gmail/fetch";
+import { resolveMerchant } from "@/lib/merchant";
 import { parseEmail } from "@/lib/parsing/engine";
-import { normalizeMerchant } from "@/lib/parsing/normalize";
 import type { EmailMessage } from "@/lib/parsing/types";
 import { sleep } from "@/lib/utils";
 
@@ -78,12 +78,19 @@ export async function reparseUserTransactions(userId: string): Promise<ReparseSu
       // bank's own email included, and applies here too so importing a
       // contact retroactively fixes transactions synced before it existed.
       const contact = matchContact(contactCtx, { merchant: parsed.merchant, upiId: parsed.upiId });
-      const merchant = contact ? contact.name : parsed.merchant;
-      const merchantNormalized = normalizeMerchant(merchant ?? parsed.upiId);
+      const { merchant, merchantSource, merchantConfidence, merchantNormalized } = resolveMerchant(
+        parsed.merchant,
+        parsed.merchantSource,
+        parsed.merchantConfidence,
+        parsed.upiId,
+        contact?.name ?? null,
+      );
       const updates: Partial<typeof transactions.$inferInsert> = {};
 
       if ((merchant ?? null) !== txn.merchant) updates.merchant = merchant ?? null;
       if (merchantNormalized !== txn.merchantNormalized) updates.merchantNormalized = merchantNormalized;
+      if (merchantSource !== txn.merchantSource) updates.merchantSource = merchantSource;
+      if (merchantConfidence !== txn.merchantConfidence) updates.merchantConfidence = merchantConfidence;
       if (parsed.upiId && parsed.upiId !== txn.upiId) updates.upiId = parsed.upiId;
       if (parsed.channel && parsed.channel !== txn.channel) updates.channel = parsed.channel;
       if (parsed.referenceNumber && parsed.referenceNumber !== txn.referenceNumber) {
@@ -95,13 +102,16 @@ export async function reparseUserTransactions(userId: string): Promise<ReparseSu
       if (parsed.confidence !== txn.confidence) updates.confidence = parsed.confidence;
 
       if (!txn.categoryId) {
-        const categoryId = categorize(ctx, {
+        const category = categorize(ctx, {
           merchantNormalized,
           merchant,
           upiId: parsed.upiId,
           subject: txn.emailSubject,
         });
-        if (categoryId) updates.categoryId = categoryId;
+        if (category.categoryId) {
+          updates.categoryId = category.categoryId;
+          updates.categorySource = category.source;
+        }
       }
 
       if (Object.keys(updates).length > 0) {

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   ArrowDownLeft,
   ArrowUpDown,
   ArrowUpRight,
@@ -9,6 +10,7 @@ import {
   Pencil,
   RotateCcw,
   Search,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -30,11 +32,18 @@ interface Txn {
   categoryId: string | null;
   categoryName: string | null;
   categoryColor: string | null;
+  categorySource: string | null;
   notes: string | null;
   confidence: number | null;
+  merchantConfidence: number | null;
   duplicateOfId: string | null;
   deletedAt: number | null;
   emailSubject: string | null;
+}
+
+const LOW_MERCHANT_CONFIDENCE = 0.6;
+function isLowConfidenceMerchant(t: Pick<Txn, "merchantConfidence">): boolean {
+  return t.merchantConfidence != null && t.merchantConfidence < LOW_MERCHANT_CONFIDENCE;
 }
 
 interface CategoryRow {
@@ -58,6 +67,8 @@ export function Ledger() {
   const [channel, setChannel] = useState("");
   const [direction, setDirection] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
+  const [lowConfidence, setLowConfidence] = useState(false);
+  const [autoCategorized, setAutoCategorized] = useState(false);
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "occurredAt", dir: "desc" });
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Txn | null>(null);
@@ -69,12 +80,14 @@ export function Ledger() {
     if (channel) p.set("channel", channel);
     if (direction) p.set("direction", direction);
     if (showDeleted) p.set("onlyDeleted", "1");
+    if (lowConfidence) p.set("lowConfidence", "1");
+    if (autoCategorized) p.set("categorySource", "generic");
     p.set("sort", sort.key);
     p.set("dir", sort.dir);
     p.set("page", String(page));
     p.set("pageSize", "50");
     return p.toString();
-  }, [q, category, channel, direction, showDeleted, sort, page]);
+  }, [q, category, channel, direction, showDeleted, lowConfidence, autoCategorized, sort, page]);
 
   const { data, isLoading, mutate } = useSWR<{ rows: Txn[]; total: number; pageSize: number }>(
     `/api/transactions?${query}`,
@@ -146,6 +159,22 @@ export function Ledger() {
         <Button variant={showDeleted ? "primary" : "secondary"} size="sm" onClick={() => resetFilters(() => setShowDeleted((v) => !v))}>
           <Trash2 className="h-3.5 w-3.5" /> Deleted
         </Button>
+        <Button
+          variant={lowConfidence ? "primary" : "secondary"}
+          size="sm"
+          onClick={() => resetFilters(() => setLowConfidence((v) => !v))}
+          title="Merchant name is a guess — needs verifying"
+        >
+          <AlertTriangle className="h-3.5 w-3.5" /> Low-confidence
+        </Button>
+        <Button
+          variant={autoCategorized ? "primary" : "secondary"}
+          size="sm"
+          onClick={() => resetFilters(() => setAutoCategorized((v) => !v))}
+          title="Category assigned by a broad generic keyword, not a specific brand"
+        >
+          <Sparkles className="h-3.5 w-3.5" /> Auto-categorized
+        </Button>
       </div>
 
       {/* Desktop table */}
@@ -172,6 +201,11 @@ export function Ledger() {
                 <td className="max-w-[220px] px-3 py-2.5 text-[13px]">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium capitalize">{t.merchant ?? t.upiId ?? "—"}</span>
+                    {isLowConfidenceMerchant(t) && (
+                      <span title="Merchant name is a guess — tap to verify">
+                        <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+                      </span>
+                    )}
                     {t.duplicateOfId && (
                       <span title="Possible duplicate">
                         <Copy className="h-3 w-3 shrink-0 text-amber-500" />
@@ -192,19 +226,26 @@ export function Ledger() {
                 </td>
                 <td className="px-3 py-2.5 text-[13px] text-muted">{t.channel ?? "—"}</td>
                 <td className="px-3 py-2.5">
-                  <Select
-                    value={t.categoryId ?? ""}
-                    onChange={(e) => patch(t.id, { categoryId: e.target.value || null })}
-                    className="h-8 max-w-[150px] text-[12px]"
-                    aria-label="Category"
-                  >
-                    <option value="">—</option>
-                    {cats?.rows.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={t.categoryId ?? ""}
+                      onChange={(e) => patch(t.id, { categoryId: e.target.value || null })}
+                      className="h-8 max-w-[150px] text-[12px]"
+                      aria-label="Category"
+                    >
+                      <option value="">—</option>
+                      {cats?.rows.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {t.categorySource === "generic" && (
+                      <span title="Auto-categorized by a broad keyword — verify">
+                        <Sparkles className="h-3 w-3 shrink-0 text-muted" />
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="max-w-[180px] truncate px-3 py-2.5 text-[13px] text-muted">{t.notes ?? ""}</td>
                 <td className="px-3 py-2.5">
@@ -263,6 +304,9 @@ export function Ledger() {
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 truncate text-[14px] font-medium capitalize">
                   {t.merchant ?? t.upiId ?? "Transaction"}
+                  {isLowConfidenceMerchant(t) && (
+                    <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" aria-label="Merchant name is a guess" />
+                  )}
                   {t.duplicateOfId && <Copy className="h-3 w-3 shrink-0 text-amber-500" />}
                 </p>
                 <p className="mt-0.5 text-[12px] text-muted">
@@ -280,7 +324,10 @@ export function Ledger() {
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {t.categoryName ? (
-                <Badge color={t.categoryColor ?? undefined}>{t.categoryName}</Badge>
+                <Badge color={t.categoryColor ?? undefined} className={cn(t.categorySource === "generic" && "border-dashed")}>
+                  {t.categorySource === "generic" && <Sparkles className="h-2.5 w-2.5" aria-hidden />}
+                  {t.categoryName}
+                </Badge>
               ) : (
                 <Badge className="text-muted">Uncategorized</Badge>
               )}
@@ -354,16 +401,35 @@ function EditDialog({
       {txn && (
         <div className="flex flex-col gap-4">
           <div className="rounded-xl bg-card-2 p-3.5 text-[13px]">
-            <p className="font-medium capitalize">{txn.merchant ?? txn.upiId ?? "Transaction"}</p>
+            <p className="flex items-center gap-1.5 font-medium capitalize">
+              {txn.merchant ?? txn.upiId ?? "Transaction"}
+              {isLowConfidenceMerchant(txn) && (
+                <span title="Merchant name is a guess — tap to verify">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                </span>
+              )}
+            </p>
             <p className="mt-0.5 text-muted">
               {formatINR(txn.amountPaise)} {txn.direction} · {fmtDate(txn.occurredAt)} {fmtTime(txn.occurredAt)}
             </p>
             {txn.referenceNumber && <p className="mt-0.5 text-[12px] text-muted">Ref {txn.referenceNumber}</p>}
             {txn.emailSubject && <p className="mt-1 line-clamp-2 text-[12px] text-muted">“{txn.emailSubject}”</p>}
             {txn.confidence != null && <p className="mt-1 text-[11px] text-muted">Parse confidence {(txn.confidence * 100).toFixed(0)}%</p>}
+            {isLowConfidenceMerchant(txn) && (
+              <p className="mt-0.5 text-[11px] text-amber-500">
+                Merchant confidence {Math.round((txn.merchantConfidence ?? 0) * 100)}% — a guess, worth verifying
+              </p>
+            )}
           </div>
           <div>
-            <Label>Category</Label>
+            <Label className="flex items-center gap-1.5">
+              Category
+              {txn.categorySource === "generic" && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-normal text-muted" title="Assigned by a broad generic keyword, not a specific brand">
+                  <Sparkles className="h-3 w-3" /> auto
+                </span>
+              )}
+            </Label>
             <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="w-full">
               <option value="">Uncategorized</option>
               {cats.map((c) => (

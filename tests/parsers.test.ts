@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEmail } from "@/lib/parsing/engine";
+import { parseEmail, stripDisplaySuffixes } from "@/lib/parsing/engine";
 import type { EmailMessage } from "@/lib/parsing/types";
 
 const AT = Date.parse("2026-07-05T10:30:00+05:30");
@@ -162,5 +162,76 @@ describe("parseEmail — bank fixtures", () => {
     // Body's date (5 Jul) matches AT's date, so with the arrival time-of-day
     // carried over, occurredAt should land exactly on AT — not midnight IST.
     expect(p!.occurredAt).toBe(AT);
+  });
+});
+
+describe("merchant source & confidence (§1 regressions)", () => {
+  it("truncates a free-text 'Remarks' capture at a stop word instead of excising just the token", () => {
+    const p = parseEmail(
+      email(
+        "Axis Bank <alerts@axisbank.com>",
+        "Transaction alert",
+        "Rs.450.00 has been debited from your account. Remarks: DECATHLON ON ANNA SALAI.",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.merchant).toBe("DECATHLON");
+    expect(p!.merchantSource).toBe("info-freetext");
+  });
+
+  it("does not treat lowercase boilerplate right after a VPA as a beneficiary name (case-sensitive bare-name match)", () => {
+    const p = parseEmail(
+      email(
+        "HDFC Bank InstaAlerts <alerts@hdfcbank.net>",
+        "You have done a UPI txn. Check details!",
+        "Rs.500.00 is debited from your account ending 0954 towards VPA merchant123@icici for future use on 05-07-26.\nUPI transaction reference no.: 512345678901.",
+      ),
+    );
+    expect(p).not.toBeNull();
+    // No capitalised beneficiary name is present, so extraction falls back to
+    // the real UPI id rather than capturing lowercase boilerplate.
+    expect(p!.merchant).toBe("merchant123@icici");
+    expect(p!.merchantSource).toBe("upi-id");
+  });
+
+  it("prefers the UPI id over a mangled reference-number-like free-text capture", () => {
+    const p = parseEmail(
+      email(
+        "Axis Bank <alerts@axisbank.com>",
+        "Transaction alert",
+        "Rs.750.00 has been debited from your account towards VPA vendor99@axis. Remarks: N182260012345678901.",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.merchant).toBe("vendor99@axis");
+    expect(p!.merchantSource).toBe("upi-id");
+  });
+
+  it("assigns vpa-name source and 0.85 confidence for a parenthetical beneficiary name", () => {
+    const p = parseEmail(
+      email(
+        "HDFC Bank InstaAlerts <alerts@hdfcbank.net>",
+        "You have done a UPI txn. Check details!",
+        "Rs.285.00 has been debited from account **7712 to VPA swiggy@icici SWIGGY on 05-07-26. Your UPI transaction reference number is 512345678901.",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.merchantSource).toBe("vpa-name");
+    expect(p!.merchantConfidence).toBe(0.85);
+  });
+});
+
+describe("stripDisplaySuffixes", () => {
+  it("strips trailing corporate suffixes but leaves the core name", () => {
+    expect(stripDisplaySuffixes("Uber India Systems")).toBe("Uber");
+    expect(stripDisplaySuffixes("Ramesh Kirana Store Pvt Ltd")).toBe("Ramesh Kirana Store");
+  });
+
+  it("leaves a merchant with no trailing suffix unchanged", () => {
+    expect(stripDisplaySuffixes("Swiggy")).toBe("Swiggy");
+  });
+
+  it("does not strip a suffix word that appears mid-string, not at the end", () => {
+    expect(stripDisplaySuffixes("India Gate Restaurant")).toBe("India Gate Restaurant");
   });
 });

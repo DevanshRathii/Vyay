@@ -92,6 +92,10 @@ export const transactions = pgTable(
     direction: text("direction").notNull(), // debit | credit
     merchant: text("merchant"),
     merchantNormalized: text("merchant_normalized"),
+    /** contact | narration | vpa-name | pattern | info-freetext | upi-id */
+    merchantSource: text("merchant_source"),
+    /** 0–1, confidence in the merchant extraction specifically (distinct from `confidence`) */
+    merchantConfidence: doublePrecision("merchant_confidence"),
     channel: text("channel"), // UPI | Card | IMPS | NEFT | RTGS | Wallet | ATM | NetBanking | Other
     bank: text("bank"),
     referenceNumber: text("reference_number"),
@@ -100,6 +104,8 @@ export const transactions = pgTable(
     emailSubject: text("email_subject"),
     confidence: doublePrecision("confidence"),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** user | brand | generic — how categoryId was assigned */
+    categorySource: text("category_source"),
     notes: text("notes"),
     /** original parse payload, JSON — kept for future re-parsing */
     raw: text("raw"),
