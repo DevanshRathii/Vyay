@@ -18,6 +18,13 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
+import { PROVIDERS } from "@/lib/parsing/providers";
+
+// Banks first, then wallets/UPI apps (providers with no `bank` field) — all
+// selected by default, so doing nothing on this picker means "all providers".
+const BANK_PROVIDERS = PROVIDERS.filter((p) => p.bank);
+const WALLET_PROVIDERS = PROVIDERS.filter((p) => !p.bank);
+const ALL_PROVIDER_IDS = PROVIDERS.map((p) => p.id);
 
 // A large initial sync can need several passes under Vercel's 300s function
 // ceiling. Auto-continue this many times before asking the user to resume
@@ -64,6 +71,35 @@ function fmt(ms: number | null) {
   });
 }
 
+// ── Provider picker ─────────────────────────────────────────────────────────
+// Shown pre-connect: narrows which banks/apps the sync query looks for. All
+// are pre-checked; skipping this (leaving everything checked) means "all
+// providers", same as never having picked anything.
+
+function ProviderPicker({ selected, onToggle }: { selected: Set<string>; onToggle: (id: string) => void }) {
+  return (
+    <div className="rounded-xl border border-line p-3.5">
+      <p className="mb-2 text-[12px] font-medium text-muted">
+        Which banks and apps should Vyay look for? All are selected by default — narrowing this can speed up
+        your first sync. You can change this later by disconnecting and reconnecting.
+      </p>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3">
+        {[...BANK_PROVIDERS, ...WALLET_PROVIDERS].map((p) => (
+          <label key={p.id} className="flex items-center gap-1.5 text-[13px]">
+            <input
+              type="checkbox"
+              checked={selected.has(p.id)}
+              onChange={() => onToggle(p.id)}
+              className="h-3.5 w-3.5 accent-[var(--accent)]"
+            />
+            {p.name}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Gmail card ──────────────────────────────────────────────────────────────
 
 function GmailCard() {
@@ -79,6 +115,21 @@ function GmailCard() {
   const [autoContinues, setAutoContinues] = useState(0);
   const [autoContinueExhausted, setAutoContinueExhausted] = useState(false);
   const prevSyncStatus = useRef<GmailStatus["syncStatus"]>(undefined);
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(() => new Set(ALL_PROVIDER_IDS));
+
+  function toggleProvider(id: string) {
+    setSelectedProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const connectHref =
+    selectedProviders.size === ALL_PROVIDER_IDS.length
+      ? "/api/gmail/connect"
+      : `/api/gmail/connect?providers=${encodeURIComponent([...selectedProviders].join(","))}`;
 
   async function syncNow(full = false) {
     setStarting(true);
@@ -157,8 +208,9 @@ function GmailCard() {
               Connect the Gmail account that receives your bank and UPI transaction alerts. Vyay only requests
               read-only access and never modifies or sends email.
             </p>
+            <ProviderPicker selected={selectedProviders} onToggle={toggleProvider} />
             <div className="flex flex-wrap items-center gap-2">
-              <a href="/api/gmail/connect">
+              <a href={connectHref}>
                 <Button>
                   <Mail className="h-4 w-4" /> Connect Gmail
                 </Button>

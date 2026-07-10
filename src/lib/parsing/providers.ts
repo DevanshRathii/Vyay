@@ -70,6 +70,41 @@ export const PROVIDERS: Provider[] = [
     queryDomains: ["aubank.in"],
   },
   {
+    id: "yesbank",
+    name: "Yes Bank",
+    bank: "Yes Bank",
+    senders: [/yesbank\.in/i],
+    queryDomains: ["yesbank.in"],
+  },
+  {
+    id: "pnb",
+    name: "Punjab National Bank",
+    bank: "PNB",
+    senders: [/pnbindia\.in/i],
+    queryDomains: ["pnbindia.in"],
+  },
+  {
+    id: "bob",
+    name: "Bank of Baroda",
+    bank: "Bank of Baroda",
+    senders: [/bankofbaroda\.(co\.in|in)/i],
+    queryDomains: ["bankofbaroda.co.in", "bankofbaroda.in"],
+  },
+  {
+    id: "canara",
+    name: "Canara Bank",
+    bank: "Canara Bank",
+    senders: [/canarabank\.com/i],
+    queryDomains: ["canarabank.com"],
+  },
+  {
+    id: "unionbank",
+    name: "Union Bank of India",
+    bank: "Union Bank",
+    senders: [/unionbankofindia\.co\.in/i],
+    queryDomains: ["unionbankofindia.co.in"],
+  },
+  {
     id: "amex",
     name: "American Express",
     bank: "American Express",
@@ -130,9 +165,16 @@ export function matchProvider(from: string): Provider | undefined {
   return PROVIDERS.find((p) => p.senders.some((re) => re.test(from)));
 }
 
-/** Gmail search fragment restricting sync to known transaction senders. */
-export function senderQuery(): string {
-  const domains = Array.from(new Set(PROVIDERS.flatMap((p) => p.queryDomains)));
+/**
+ * Gmail search fragment restricting sync to known transaction senders.
+ * `providerIds`, when given, further narrows to just those providers (the
+ * connection's `selectedProviders`); an empty selection is treated the same
+ * as no selection — falls back to all providers rather than emitting a
+ * query that would match nothing.
+ */
+export function senderQuery(providerIds?: string[] | null): string {
+  const active = providerIds && providerIds.length > 0 ? PROVIDERS.filter((p) => providerIds.includes(p.id)) : PROVIDERS;
+  const domains = Array.from(new Set(active.flatMap((p) => p.queryDomains)));
   return "(" + domains.map((d) => `from:(${d})`).join(" OR ") + ")";
 }
 
