@@ -147,7 +147,7 @@ export function AppShell({
       {/* Content */}
       <main className="min-w-0 flex-1 px-4 pb-24 pt-5 sm:px-8 sm:pb-10">
         {children}
-        <footer className="mt-10 pb-2 text-center text-[11px] text-muted/70">Created by Devansh Rathi</footer>
+        <footer className="mt-10 pb-2 text-center text-[11px] text-muted">Created by Devansh Rathi</footer>
       </main>
 
       {/* Mobile bottom tabs */}

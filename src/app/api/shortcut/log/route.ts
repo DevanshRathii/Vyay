@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, count, eq, gte } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -7,6 +7,18 @@ import { sha256 } from "@/lib/crypto";
 import { applyEventToTransaction, findCandidates } from "@/lib/match";
 
 export const dynamic = "force-dynamic";
+
+// Generous enough for normal use (even a burst of catching up on several
+// past expenses), tight enough to stop a runaway Shortcut loop or a leaked
+// token from writing unbounded rows. Counts accepted events, not raw HTTP
+// requests — no new infra, just a COUNT against shortcutEvents itself.
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 20;
+
+// A cheap backstop against the same failure mode on the category
+// auto-create path: an unbounded loop of never-repeating category names
+// would otherwise create one category per call forever.
+const MAX_CATEGORIES = 100;
 
 const bodySchema = z.object({
   /** Rupees, e.g. 249.5 */
@@ -40,6 +52,19 @@ export async function POST(req: Request) {
   await db.update(apiTokens).set({ lastUsedAt: Date.now() }).where(eq(apiTokens.id, tokenRow.id));
   const userId = tokenRow.userId;
 
+  const recent = (
+    await db
+      .select({ n: count() })
+      .from(shortcutEvents)
+      .where(and(eq(shortcutEvents.userId, userId), gte(shortcutEvents.createdAt, Date.now() - RATE_LIMIT_WINDOW_MS)))
+  )[0]?.n ?? 0;
+  if (recent >= RATE_LIMIT_MAX) {
+    return NextResponse.json(
+      { error: `Too many logs — limit is ${RATE_LIMIT_MAX} per minute. Try again shortly.` },
+      { status: 429 },
+    );
+  }
+
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
@@ -52,6 +77,12 @@ export async function POST(req: Request) {
   const cats = await db.select().from(categories).where(eq(categories.userId, userId));
   let cat = cats.find((c) => c.name.toLowerCase() === category.toLowerCase());
   if (!cat) {
+    if (cats.length >= MAX_CATEGORIES) {
+      return NextResponse.json(
+        { error: `You have ${cats.length} categories already — pick an existing one instead of a new name.` },
+        { status: 400 },
+      );
+    }
     cat = (await db.insert(categories).values({ userId, name: category }).returning())[0];
   }
 
