@@ -1,8 +1,8 @@
 "use client";
 
 import { cva, type VariantProps } from "class-variance-authority";
-import { X } from "lucide-react";
-import { useEffect } from "react";
+import { MoreHorizontal, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 // ── Button ──────────────────────────────────────────────────────────────────
@@ -35,6 +35,73 @@ export function Button({
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants>) {
   return <button className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+}
+
+// ── Action menu ─────────────────────────────────────────────────────────────
+// A small "⋯" dropdown for demoting rare/secondary actions off a button row
+// that would otherwise overflow on narrow screens.
+
+export function ActionMenu({ children, align = "end" }: { children: React.ReactNode; align?: "start" | "end" }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocPointerDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          onClick={() => setOpen(false)}
+          className={cn(
+            "absolute top-full z-20 mt-1 flex min-w-[10.5rem] flex-col gap-0.5 rounded-xl border border-line bg-card p-1.5 shadow-lg",
+            align === "end" ? "right-0" : "left-0",
+          )}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ActionMenuItem({ className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      role="menuitem"
+      className={cn(
+        "flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-fg",
+        "hover:bg-line/50 disabled:pointer-events-none disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 // ── Inputs ──────────────────────────────────────────────────────────────────
@@ -146,6 +213,9 @@ export function Spinner({ className }: { className?: string }) {
 
 // ── Dialog ──────────────────────────────────────────────────────────────────
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function Dialog({
   open,
   onClose,
@@ -159,9 +229,30 @@ export function Dialog({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  // Escape to close, and trap Tab focus inside the dialog while open.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const focusable = panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     return () => {
@@ -170,13 +261,25 @@ export function Dialog({
     };
   }, [open, onClose]);
 
+  // Move focus into the dialog on open, restore it to the trigger on close.
+  useEffect(() => {
+    if (open) {
+      previouslyFocused.current = document.activeElement as HTMLElement | null;
+      panelRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
+    } else {
+      previouslyFocused.current?.focus();
+    }
+  }, [open]);
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
       <div
+        ref={panelRef}
         className={cn(
           "relative z-10 w-full rounded-t-2xl bg-card p-5 shadow-2xl sm:rounded-2xl",
+          "pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-5",
           wide ? "sm:max-w-2xl" : "sm:max-w-md",
           "max-h-[85dvh] overflow-y-auto",
         )}

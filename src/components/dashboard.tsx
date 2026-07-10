@@ -65,11 +65,14 @@ function rangeToMs(value: string): { from: number; to: number } {
 function StatCard({
   label,
   value,
+  compactValue,
   icon,
   tone,
 }: {
   label: string;
   value: string;
+  /** Shorter rendering shown below the `sm` breakpoint, where a 2-col grid leaves little room. */
+  compactValue?: string;
   icon: React.ReactNode;
   tone?: "positive" | "negative";
 }) {
@@ -86,7 +89,14 @@ function StatCard({
             (tone === "positive" ? "text-positive" : tone === "negative" ? "text-negative" : "")
           }
         >
-          {value}
+          {compactValue ? (
+            <>
+              <span className="sm:hidden">{compactValue}</span>
+              <span className="hidden sm:inline">{value}</span>
+            </>
+          ) : (
+            value
+          )}
         </p>
       </div>
     </Card>
@@ -150,9 +160,26 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Spent" value={formatINR(totals.debit)} tone="negative" icon={<ArrowUpRight className="h-5 w-5" />} />
-        <StatCard label="Received" value={formatINR(totals.credit)} tone="positive" icon={<ArrowDownLeft className="h-5 w-5" />} />
-        <StatCard label="Net" value={formatINR(totals.net)} icon={<ReceiptText className="h-5 w-5" />} />
+        <StatCard
+          label="Spent"
+          value={formatINR(totals.debit)}
+          compactValue={formatINR(totals.debit, { compact: true })}
+          tone="negative"
+          icon={<ArrowUpRight className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Received"
+          value={formatINR(totals.credit)}
+          compactValue={formatINR(totals.credit, { compact: true })}
+          tone="positive"
+          icon={<ArrowDownLeft className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Net"
+          value={formatINR(totals.net)}
+          compactValue={formatINR(totals.net, { compact: true })}
+          icon={<ReceiptText className="h-5 w-5" />}
+        />
         <StatCard label="Transactions" value={String(totals.count)} icon={<Inbox className="h-5 w-5" />} />
       </div>
 
@@ -197,7 +224,7 @@ export function Dashboard() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={monthData} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--muted)" }} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--muted)" }} tickLine={false} axisLine={false} minTickGap={24} />
                     <YAxis tick={{ fontSize: 11, fill: "var(--muted)" }} tickLine={false} axisLine={false} width={44} tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))} />
                     <Tooltip
                       cursor={{ fill: "var(--line)", opacity: 0.4 }}

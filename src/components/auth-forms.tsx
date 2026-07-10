@@ -31,6 +31,7 @@ function AuthCard({ children, title, subtitle }: { children: React.ReactNode; ti
           </div>
         </div>
         <Card className="p-5">{children}</Card>
+        <footer className="mt-6 text-center text-[11px] text-muted/70">Created by Devansh Rathi</footer>
       </div>
     </div>
   );
