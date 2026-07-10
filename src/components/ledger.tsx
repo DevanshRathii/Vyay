@@ -4,6 +4,7 @@ import {
   ArrowDownLeft,
   ArrowUpDown,
   ArrowUpRight,
+  ChevronRight,
   Copy,
   Pencil,
   RotateCcw,
@@ -244,7 +245,20 @@ export function Ledger() {
           </div>
         )}
         {data?.rows.map((t) => (
-          <Card key={t.id} className={cn("p-3.5", t.deletedAt && "opacity-50")} onClick={() => setEditing(t)}>
+          <Card
+            key={t.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => setEditing(t)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setEditing(t);
+              }
+            }}
+            aria-label={`Edit transaction: ${t.merchant ?? t.upiId ?? "Transaction"}, ${formatINR(t.amountPaise)}`}
+            className={cn("cursor-pointer p-3.5", t.deletedAt && "opacity-50")}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 truncate text-[14px] font-medium capitalize">
@@ -256,10 +270,13 @@ export function Ledger() {
                   {t.channel ? ` · ${t.channel}` : ""}
                 </p>
               </div>
-              <p className={cn("shrink-0 text-[15px] font-semibold tabular-nums", t.direction === "credit" ? "text-positive" : "")}>
-                {t.direction === "credit" ? "+" : "−"}
-                {formatINR(t.amountPaise)}
-              </p>
+              <div className="flex shrink-0 items-center gap-1">
+                <p className={cn("text-[15px] font-semibold tabular-nums", t.direction === "credit" ? "text-positive" : "")}>
+                  {t.direction === "credit" ? "+" : "−"}
+                  {formatINR(t.amountPaise)}
+                </p>
+                <ChevronRight className="h-3.5 w-3.5 text-muted" aria-hidden />
+              </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {t.categoryName ? (

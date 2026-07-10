@@ -17,7 +17,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import useSWR from "swr";
-import { Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
+import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
 
 interface GmailStatus {
   oauthConfigured: boolean;
@@ -175,25 +175,21 @@ function GmailCard() {
                   </span>
                 )}
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Button size="sm" variant="secondary" disabled={syncing} onClick={() => syncNow(false)}>
                   <RefreshCw className={syncing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Sync now
-                </Button>
-                <Button size="sm" variant="ghost" disabled={syncing} onClick={() => syncNow(true)} title="Re-scan the full lookback window">
-                  Full resync
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={reparsing}
-                  onClick={reparse}
-                  title="Re-run the parser on already-imported transactions using their stored raw email"
-                >
-                  <Wand2 className={reparsing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Re-parse
                 </Button>
                 <Button size="sm" variant="danger" onClick={disconnect}>
                   <Unplug className="h-3.5 w-3.5" /> Disconnect
                 </Button>
+                <ActionMenu>
+                  <ActionMenuItem disabled={syncing} onClick={() => syncNow(true)}>
+                    <RefreshCw className="h-3.5 w-3.5" /> Full resync
+                  </ActionMenuItem>
+                  <ActionMenuItem disabled={reparsing} onClick={reparse}>
+                    <Wand2 className={reparsing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Re-parse
+                  </ActionMenuItem>
+                </ActionMenu>
               </div>
             </div>
             {data.syncStatus === "error" && data.syncError && (
@@ -278,13 +274,11 @@ function TokensCard() {
           </Button>
         </div>
         {(data?.rows ?? []).map((t) => (
-          <div key={t.id} className="flex items-center justify-between border-b border-line py-2 text-[13px] last:border-0">
-            <span className="flex items-center gap-2">
-              <KeyRound className="h-3.5 w-3.5 text-muted" />
-              <span className="font-medium">{t.label}</span>
-              <span className="text-[12px] text-muted">last used {fmt(t.lastUsedAt)}</span>
-            </span>
-            <Button variant="danger" size="icon" className="h-8 w-8" onClick={() => remove(t.id)} aria-label="Revoke token">
+          <div key={t.id} className="flex items-center gap-2 border-b border-line py-2 text-[13px] last:border-0">
+            <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted" />
+            <span className="min-w-0 flex-1 truncate font-medium">{t.label}</span>
+            <span className="shrink-0 text-[12px] text-muted">last used {fmt(t.lastUsedAt)}</span>
+            <Button variant="danger" size="icon" className="h-8 w-8 shrink-0" onClick={() => remove(t.id)} aria-label="Revoke token">
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>

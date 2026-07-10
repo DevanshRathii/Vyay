@@ -48,7 +48,11 @@ function ThemeToggle() {
 function MatchesDot() {
   const { data } = useSWR<{ rows: unknown[] }>("/api/matches", { refreshInterval: 60_000 });
   if (!data?.rows?.length) return null;
-  return <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />;
+  return (
+    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent">
+      <span className="sr-only">Pending matches</span>
+    </span>
+  );
 }
 
 /** App shell: fixed sidebar ≥sm, bottom tab bar on phones. */
@@ -101,7 +105,10 @@ export function AppShell({ children, userName }: { children: React.ReactNode; us
       </aside>
 
       {/* Content */}
-      <main className="min-w-0 flex-1 px-4 pb-24 pt-5 sm:px-8 sm:pb-10">{children}</main>
+      <main className="min-w-0 flex-1 px-4 pb-24 pt-5 sm:px-8 sm:pb-10">
+        {children}
+        <footer className="mt-10 pb-2 text-center text-[11px] text-muted/70">Created by Devansh Rathi</footer>
+      </main>
 
       {/* Mobile bottom tabs */}
       <nav
