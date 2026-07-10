@@ -362,8 +362,9 @@ export function Ledger() {
         </div>
       )}
 
-      {/* Edit dialog */}
-      <EditDialog txn={editing} cats={cats?.rows ?? []} onClose={() => setEditing(null)} onSave={async (body) => {
+      {/* Edit dialog. Keyed by transaction id so React remounts it fresh per
+          transaction instead of resetting form state during render. */}
+      <EditDialog key={editing?.id ?? "none"} txn={editing} cats={cats?.rows ?? []} onClose={() => setEditing(null)} onSave={async (body) => {
         if (editing) await patch(editing.id, body);
         setEditing(null);
       }} onDeleteToggle={async () => {
@@ -387,14 +388,8 @@ function EditDialog({
   onSave: (body: { categoryId: string | null; notes: string | null }) => Promise<void>;
   onDeleteToggle: () => Promise<void>;
 }) {
-  const [categoryId, setCategoryId] = useState<string>("");
-  const [notes, setNotes] = useState("");
-  const [key, setKey] = useState<string | null>(null);
-  if (txn && key !== txn.id) {
-    setKey(txn.id);
-    setCategoryId(txn.categoryId ?? "");
-    setNotes(txn.notes ?? "");
-  }
+  const [categoryId, setCategoryId] = useState<string>(txn?.categoryId ?? "");
+  const [notes, setNotes] = useState(txn?.notes ?? "");
 
   return (
     <Dialog open={!!txn} onClose={onClose} title="Edit transaction">
