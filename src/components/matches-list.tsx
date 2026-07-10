@@ -73,7 +73,7 @@ export function MatchesList() {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div data-tour="matches-list" className="flex flex-col gap-3">
       {data.rows.map((e) => {
         const chosen = selected[e.id] ?? (e.candidates.length === 1 ? e.candidates[0].id : "");
         return (

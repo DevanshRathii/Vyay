@@ -14,20 +14,27 @@ import {
   Settings,
   Sun,
   Tags,
+  type LucideIcon,
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+export interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+export const NAV: NavItem[] = [
   { href: "/", label: "Overview", icon: ChartPie },
   { href: "/ledger", label: "Ledger", icon: List },
   { href: "/categories", label: "Categories", icon: Tags },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/matches", label: "Matches", icon: GitMerge },
   { href: "/settings", label: "Settings", icon: Settings },
-] as const;
+];
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -55,9 +62,30 @@ function MatchesDot() {
   );
 }
 
-/** App shell: fixed sidebar ≥sm, bottom tab bar on phones. */
-export function AppShell({ children, userName }: { children: React.ReactNode; userName?: string | null }) {
+/**
+ * App shell: fixed sidebar ≥sm, bottom tab bar on phones.
+ *
+ * Demo mode (activePage + onNavigate both set): nav items become buttons
+ * that switch a locally-held "page" instead of real routing, so a driver.js
+ * tour running across "pages" never remounts and never loses its place.
+ * Omitting them (the entire real app) is byte-identical to before this.
+ */
+export function AppShell({
+  children,
+  userName,
+  activePage,
+  onNavigate,
+  navItems = NAV,
+}: {
+  children: React.ReactNode;
+  userName?: string | null;
+  activePage?: string;
+  onNavigate?: (href: string) => void;
+  navItems?: NavItem[];
+}) {
   const pathname = usePathname();
+  const isDemo = onNavigate !== undefined;
+  const isActive = (href: string) => (isDemo ? activePage === href : pathname === href);
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl">
@@ -71,20 +99,26 @@ export function AppShell({ children, userName }: { children: React.ReactNode; us
             <span className="text-[17px] font-semibold tracking-tight">Vyay</span>
           </Link>
           <nav className="flex flex-col gap-0.5">
-            {NAV.map(({ href, label, icon: Icon }) => {
-              const active = pathname === href;
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={cn(
-                    "relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium",
-                    active ? "bg-line/60 text-fg" : "text-muted hover:bg-line/40 hover:text-fg",
-                  )}
-                >
+            {navItems.map(({ href, label, icon: Icon }) => {
+              const active = isActive(href);
+              const className = cn(
+                "relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm font-medium",
+                active ? "bg-line/60 text-fg" : "text-muted hover:bg-line/40 hover:text-fg",
+              );
+              const content = (
+                <>
                   <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
                   {label}
                   {href === "/matches" && <MatchesDot />}
+                </>
+              );
+              return isDemo ? (
+                <button key={href} type="button" data-tour={`nav-${href}`} onClick={() => onNavigate!(href)} className={className}>
+                  {content}
+                </button>
+              ) : (
+                <Link key={href} href={href} className={className}>
+                  {content}
                 </Link>
               );
             })}
@@ -93,12 +127,18 @@ export function AppShell({ children, userName }: { children: React.ReactNode; us
         <div className="flex items-center justify-between px-2">
           <div className="min-w-0">
             <p className="truncate text-[13px] font-medium">{userName ?? "Account"}</p>
-            <button
-              className="flex items-center gap-1 text-[12px] text-muted hover:text-fg"
-              onClick={() => signOut({ callbackUrl: "/login" })}
-            >
-              <LogOut className="h-3 w-3" /> Sign out
-            </button>
+            {isDemo ? (
+              <Link href="/login" className="flex items-center gap-1 text-[12px] text-muted hover:text-fg">
+                <LogOut className="h-3 w-3" /> Exit demo
+              </Link>
+            ) : (
+              <button
+                className="flex items-center gap-1 text-[12px] text-muted hover:text-fg"
+                onClick={() => signOut({ callbackUrl: "/login" })}
+              >
+                <LogOut className="h-3 w-3" /> Sign out
+              </button>
+            )}
           </div>
           <ThemeToggle />
         </div>
@@ -115,20 +155,26 @@ export function AppShell({ children, userName }: { children: React.ReactNode; us
         className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-line bg-card/90 backdrop-blur-lg sm:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        {NAV.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href;
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium",
-                active ? "text-accent" : "text-muted",
-              )}
-            >
+        {navItems.map(({ href, label, icon: Icon }) => {
+          const active = isActive(href);
+          const className = cn(
+            "relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium",
+            active ? "text-accent" : "text-muted",
+          );
+          const content = (
+            <>
               <Icon className="h-5 w-5" strokeWidth={active ? 2.4 : 2} />
               {label}
               {href === "/matches" && <MatchesDot />}
+            </>
+          );
+          return isDemo ? (
+            <button key={href} type="button" onClick={() => onNavigate!(href)} className={className}>
+              {content}
+            </button>
+          ) : (
+            <Link key={href} href={href} className={className}>
+              {content}
             </Link>
           );
         })}

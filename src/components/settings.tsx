@@ -184,7 +184,7 @@ function GmailCard() {
   const syncing = data?.syncStatus === "syncing" || starting;
 
   return (
-    <Card>
+    <Card data-tour="settings-gmail">
       <CardHeader
         title="Gmail"
         subtitle="Read-only access to transaction emails. Tokens are encrypted at rest."

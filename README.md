@@ -6,6 +6,8 @@ Every UPI payment, card swipe, and bank transfer in India generates an email. Vy
 
 Vyay runs as a hosted app (Vercel + Supabase Postgres) with Google-only sign-in — each user's Gmail connection, tokens, and transactions are isolated to their own account (every query is scoped by `userId`). It can also run self-hosted against any Postgres database. Gmail OAuth tokens are AES-256-GCM encrypted at rest either way; no third-party services beyond Google (for auth/Gmail) and your Postgres host.
 
+**[Try the interactive demo](https://vyay-five.vercel.app/demo)** — a guided tour with sample data, no sign-in required.
+
 ## Features
 
 - **Automatic ingestion** — parses transaction alerts from HDFC, ICICI, SBI, Axis, Kotak, IndusInd, Yes Bank, IDFC First, PNB, BoB, Canara, Union Bank, Federal Bank, AU, Google Pay, PhonePe, and Paytm. Extracts amount, direction, merchant, UPI VPA, reference number, card last-4, channel (UPI/Card/IMPS/NEFT/RTGS/ATM/…), and timestamp (IST-aware).

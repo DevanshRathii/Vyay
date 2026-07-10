@@ -1,6 +1,7 @@
 "use client";
 
 import { IndianRupee } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Suspense } from "react";
@@ -53,6 +54,11 @@ function LoginInner({ googleEnabled }: { googleEnabled: boolean }) {
           GOOGLE_CLIENT_SECRET.
         </p>
       )}
+      <Link href="/demo" className="mt-2 block">
+        <Button variant="ghost" className="w-full">
+          Take a 2-minute tour
+        </Button>
+      </Link>
     </AuthCard>
   );
 }
