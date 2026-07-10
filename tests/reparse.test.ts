@@ -120,6 +120,8 @@ describe("reparseUserTransactions", () => {
       direction: parsed.direction,
       merchant: parsed.merchant,
       merchantNormalized: "meenakshi rathi",
+      merchantSource: parsed.merchantSource ?? null,
+      merchantConfidence: parsed.merchantConfidence,
       upiId: parsed.upiId,
       channel: parsed.channel,
       bank: parsed.bank,
@@ -195,5 +197,67 @@ describe("reparseUserTransactions", () => {
     await reparseUserTransactions(userId);
     const after = (await db.select().from(transactions).where(eq(transactions.id, txn.id)))[0];
     expect(after!.merchant).toBe("Vansh Wadhwa");
+  });
+
+  it("sets merchantSource/merchantConfidence from the parse result", async () => {
+    // A P2P name, not a KNOWN_MERCHANTS brand — isolates the plain vpa-name
+    // confidence (0.85) from the known-merchant-alias confidence bump (0.95).
+    const txn = (
+      await db
+        .insert(transactions)
+        .values({
+          userId,
+          gmailMessageId: "m6",
+          source: "gmail",
+          occurredAt: AT,
+          amountPaise: 1000000,
+          direction: "debit",
+          emailSubject: "You have done a UPI txn. Check details!",
+          raw: rawFor(
+            "You have done a UPI txn. Check details!",
+            "Rs.10000.00 is debited from your account ending 0954 towards VPA meenakshi1669@okaxis (MEENAKSHI RATHI) on 01-07-26.\nUPI transaction reference no.: 125567531975.",
+            ARRIVAL,
+          ),
+        })
+        .returning()
+    )[0];
+
+    await reparseUserTransactions(userId);
+    const after = (await db.select().from(transactions).where(eq(transactions.id, txn.id)))[0];
+    expect(after!.merchantSource).toBe("vpa-name");
+    expect(after!.merchantConfidence).toBe(0.85);
+  });
+
+  it("strips a corporate suffix and canonicalizes to Title Case via the known-merchant alias map", async () => {
+    const txn = (
+      await db
+        .insert(transactions)
+        .values({
+          userId,
+          gmailMessageId: "m7",
+          source: "gmail",
+          occurredAt: AT,
+          amountPaise: 28500,
+          direction: "debit",
+          merchant: "VPA swiggy@ybl",
+          emailSubject: "You have done a UPI txn. Check details!",
+          raw: rawFor(
+            "You have done a UPI txn. Check details!",
+            "Rs.285.00 has been debited from your account ending 7712 towards VPA swiggy@ybl (SWIGGY LIMITED) on 05-07-26.\nUPI transaction reference no.: 512345678901.",
+            ARRIVAL,
+          ),
+        })
+        .returning()
+    )[0];
+
+    await reparseUserTransactions(userId);
+    const after = (await db.select().from(transactions).where(eq(transactions.id, txn.id)))[0];
+    // "SWIGGY LIMITED" is vpa-name sourced (0.85); normalizeMerchant() already
+    // strips "Limited" via NOISE_WORDS, so merchantNormalized -> "swiggy" ->
+    // KNOWN_MERCHANTS canonicalizes the display name and bumps confidence.
+    expect(after!.merchant).toBe("Swiggy");
+    expect(after!.merchantSource).toBe("vpa-name");
+    expect(after!.merchantConfidence).toBe(0.95);
+    expect(after!.merchantNormalized).toBe("swiggy");
   });
 });

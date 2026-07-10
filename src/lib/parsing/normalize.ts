@@ -3,7 +3,7 @@
  * "swiggy@ybl" all map to the same key for categorisation and analytics.
  */
 const NOISE_WORDS =
-  /\b(?:pvt|private|ltd|limited|india|ind|payments?|pay|technologies|technology|tech|solutions?|services?|retail|online|internet|ecommerce|e-commerce)\b/gi;
+  /\b(?:pvt|private|ltd|limited|india|ind|systems?|payments?|pay|technologies|technology|tech|solutions?|services?|retail|online|internet|ecommerce|e-commerce)\b/gi;
 
 export function normalizeMerchant(raw: string | null | undefined): string | null {
   if (!raw) return null;

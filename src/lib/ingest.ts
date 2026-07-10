@@ -3,9 +3,9 @@ import { db } from "@/lib/db";
 import { transactions, type Transaction } from "@/lib/db/schema";
 import { categorize, type CategorizerContext } from "@/lib/categorize";
 import { matchContact, type ContactContext } from "@/lib/contacts/match";
+import { resolveMerchant } from "@/lib/merchant";
 import { classifyEmail } from "@/lib/parsing/detect";
 import { parseEmail } from "@/lib/parsing/engine";
-import { normalizeMerchant } from "@/lib/parsing/normalize";
 import type { EmailMessage } from "@/lib/parsing/types";
 import { tryResolvePendingShortcuts } from "@/lib/match";
 
@@ -61,10 +61,15 @@ export async function ingestEmail(
   // A saved contact is the golden source — it wins even over a name the
   // bank's own email already included.
   const contact = matchContact(contactCtx, { merchant: parsed.merchant, upiId: parsed.upiId });
-  const merchant = contact ? contact.name : parsed.merchant;
+  const { merchant, merchantSource, merchantConfidence, merchantNormalized } = resolveMerchant(
+    parsed.merchant,
+    parsed.merchantSource,
+    parsed.merchantConfidence,
+    parsed.upiId,
+    contact?.name ?? null,
+  );
 
-  const merchantNormalized = normalizeMerchant(merchant ?? parsed.upiId);
-  const categoryId = categorize(ctx, {
+  const category = categorize(ctx, {
     merchantNormalized,
     merchant,
     upiId: parsed.upiId,
@@ -83,6 +88,8 @@ export async function ingestEmail(
       direction: parsed.direction,
       merchant,
       merchantNormalized,
+      merchantSource,
+      merchantConfidence,
       channel: parsed.channel,
       bank: parsed.bank,
       referenceNumber: parsed.referenceNumber,
@@ -90,7 +97,8 @@ export async function ingestEmail(
       cardLast4: parsed.cardLast4,
       emailSubject: email.subject.slice(0, 300),
       confidence: parsed.confidence,
-      categoryId,
+      categoryId: category.categoryId,
+      categorySource: category.source,
       raw: JSON.stringify({
         from: email.from,
         subject: email.subject,

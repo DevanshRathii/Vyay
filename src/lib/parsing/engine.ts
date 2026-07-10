@@ -1,6 +1,6 @@
 import { classifyEmail } from "./detect";
 import { matchProvider } from "./providers";
-import type { Direction, EmailMessage, ParsedTransaction } from "./types";
+import type { Direction, EmailMessage, MerchantSource, ParsedTransaction } from "./types";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const MAX_SCAN = 6000;
@@ -173,6 +173,14 @@ export function extractChannel(text: string, hint?: string): string | undefined 
 
 const MERCHANT_STOP = /\s+(?:on|at|via|using|vide|towards|with|for|ref|upi|dated|is|was|has)\b|[.,;\n\r(]|$/i;
 
+/** Cut the string at the first stop-word/punctuation match instead of just
+ * removing the matched token — "DECATHLON ON ANNA SALAI" must become
+ * "DECATHLON", not "DECATHLON ANNA SALAI". */
+function truncateAtStopWord(s: string): string {
+  const m = MERCHANT_STOP.exec(s);
+  return m ? s.slice(0, m.index) : s;
+}
+
 function cleanMerchant(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   let s = raw
@@ -195,6 +203,24 @@ function cleanMerchant(raw: string | undefined): string | undefined {
   return s;
 }
 
+/** Corporate suffixes that leak into a beneficiary name from generic
+ * extraction ("Uber India Systems") but add no display value. Strips only
+ * from the end (repeatedly), so a merchant that legitimately contains one of
+ * these words mid-string — not as a trailing suffix — is left alone. */
+const DISPLAY_SUFFIX_RE =
+  /\s+(?:pvt\.?|private|ltd\.?|limited|india|systems?|technolog(?:y|ies)|solutions?|services?)$/i;
+
+/** Applied at insert time (not here) to pattern/narration-sourced merchants only. */
+export function stripDisplaySuffixes(merchant: string): string {
+  let s = merchant;
+  let prev: string;
+  do {
+    prev = s;
+    s = s.replace(DISPLAY_SUFFIX_RE, "").trim();
+  } while (s !== prev && s.length > 0);
+  return s || merchant;
+}
+
 /**
  * Parse bank UPI narrations like:
  *   "UPI/DR/453212345678/SWIGGY LIMITED/YESB/swiggy@ybl/Payment"
@@ -209,13 +235,13 @@ function fromNarration(text: string): { merchant?: string; upiId?: string; ref?:
   };
 }
 
-const MERCHANT_PATTERNS: Array<{ re: RegExp; group: number }> = [
-  { re: /(?:Info|Remarks?|Narration|Description)\s*[:\-]\s*(?:UPI[/-][A-Z]{2}[/-]\d+[/-])?([^\n\r]{2,60})/i, group: 1 },
-  { re: /\bat\s+([A-Z0-9][\w &.'*@-]{1,50}?)(?=\s+on\s|\s+using\s|\s+via\s|\s+vide\s|[.,;\n]|$)/, group: 1 },
-  { re: /(?:paid|sent|payment)\s+(?:of\s+(?:₹|rs\.?|inr)\s?[\d,.]+\s+)?to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|for|is|was|has)\b|[.,;\n(]|$)/i, group: 1 },
-  { re: /(?:transferred?|remitted)\s+to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using)\b|[.,;\n(]|$)/i, group: 1 },
-  { re: /(?:received|credited)\s+from\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|to)\b|[.,;\n(]|$)/i, group: 1 },
-  { re: /\btowards\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via)\b|[.,;\n(]|$)/i, group: 1 },
+const MERCHANT_PATTERNS: Array<{ re: RegExp; group: number; source: "info-freetext" | "pattern" }> = [
+  { re: /(?:Info|Remarks?|Narration|Description)\s*[:\-]\s*(?:UPI[/-][A-Z]{2}[/-]\d+[/-])?([^\n\r]{2,60})/i, group: 1, source: "info-freetext" },
+  { re: /\bat\s+([A-Z0-9][\w &.'*@-]{1,50}?)(?=\s+on\s|\s+using\s|\s+via\s|\s+vide\s|[.,;\n]|$)/, group: 1, source: "pattern" },
+  { re: /(?:paid|sent|payment)\s+(?:of\s+(?:₹|rs\.?|inr)\s?[\d,.]+\s+)?to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|for|is|was|has)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
+  { re: /(?:transferred?|remitted)\s+to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
+  { re: /(?:received|credited)\s+from\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|to)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
+  { re: /\btowards\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
 ];
 
 /**
@@ -230,14 +256,22 @@ function extractVpaBeneficiary(text: string, upiId: string | undefined): string 
   if (!upiId) return undefined;
   const esc = upiId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  // Name after: "VPA x@y (NAME)" or "VPA x@y NAME" — optional "VPA" label,
-  // then this exact id, then either a parenthetical or a bare capitalised name.
-  const after = new RegExp(
-    String.raw`(?:VPA[:\s]*)?${esc}\s*(?:\(([^)]{2,50})\)|\s+([A-Z][\w\s.&-]{2,40}?)(?=\s+on\b|[.,;\n]|$))`,
-    "i",
+  // Name after: "VPA x@y (NAME)" — case-insensitive; a parenthetical name is
+  // quoted verbatim, so there's no risk of mistaking boilerplate for a name.
+  const afterParen = new RegExp(String.raw`(?:VPA[:\s]*)?${esc}\s*\(([^)]{2,50})\)`, "i").exec(text);
+  if (afterParen) {
+    const name = cleanMerchant(afterParen[1]);
+    if (name) return name;
+  }
+
+  // Name after: "VPA x@y NAME" — deliberately case-SENSITIVE (no "i" flag).
+  // Without this, lowercase boilerplate immediately following a VPA (common
+  // in footer text) gets mistaken for a capitalised beneficiary name.
+  const afterBare = new RegExp(
+    String.raw`(?:VPA[:\s]*)?${esc}\s+([A-Z][\w\s.&-]{2,40}?)(?=\s+on\b|[.,;\n]|$)`,
   ).exec(text);
-  if (after) {
-    const name = cleanMerchant(after[1] ?? after[2]);
+  if (afterBare) {
+    const name = cleanMerchant(afterBare[1]);
     if (name) return name;
   }
 
@@ -252,25 +286,46 @@ function extractVpaBeneficiary(text: string, upiId: string | undefined): string 
   return undefined;
 }
 
-export function extractMerchant(text: string, upiId?: string): string | undefined {
+export function extractMerchant(
+  text: string,
+  upiId?: string,
+): { merchant: string; source: "narration" | "vpa-name" | "info-freetext" | "pattern" } | undefined {
   const narration = fromNarration(text);
-  if (narration.merchant) return narration.merchant;
+  if (narration.merchant) return { merchant: narration.merchant, source: "narration" };
   const vpaBeneficiary = extractVpaBeneficiary(text, upiId);
-  if (vpaBeneficiary) return vpaBeneficiary;
-  for (const { re, group } of MERCHANT_PATTERNS) {
+  if (vpaBeneficiary) return { merchant: vpaBeneficiary, source: "vpa-name" };
+  for (const { re, group, source } of MERCHANT_PATTERNS) {
     const m = re.exec(text);
     if (m) {
       const candidate = cleanMerchant(m[group] ?? m[group + 1]);
       if (candidate) {
         // A bare VPA as merchant is fine — normalisation handles it.
-        const trimmed = candidate.replace(MERCHANT_STOP, (s) => (s.startsWith(" ") ? "" : s));
+        const trimmed = truncateAtStopWord(candidate);
         const final = cleanMerchant(trimmed);
-        if (final) return final;
+        if (final) return { merchant: final, source };
       }
     }
   }
   return undefined;
 }
+
+/** Loose sanity check for an "Info:/Remarks:" free-text capture — a real
+ * merchant name is rarely 4+ words or a token mixing letters with 4+ digits
+ * (reference numbers routinely are both), so treat those as unreliable and
+ * prefer a real UPI id over a mangled guess. */
+function looksLikeAName(s: string): boolean {
+  const words = s.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 4) return false;
+  return !words.some((w) => /[a-z]/i.test(w) && (w.match(/\d/g)?.length ?? 0) >= 4);
+}
+
+const MERCHANT_SOURCE_CONFIDENCE: Record<Exclude<MerchantSource, "contact">, number> = {
+  narration: 0.9,
+  "vpa-name": 0.85,
+  pattern: 0.7,
+  "info-freetext": 0.45,
+  "upi-id": 0.6,
+};
 
 // ── Date & time ─────────────────────────────────────────────────────────────
 
@@ -351,7 +406,25 @@ export function parseEmail(email: EmailMessage): ParsedTransaction | null {
 
   const narration = fromNarration(text);
   const upiId = narration.upiId ?? extractUpiId(text);
-  const merchant = extractMerchant(text, upiId) ?? (upiId ? upiId : undefined);
+
+  const merchantResult = extractMerchant(text, upiId);
+  let merchant = merchantResult?.merchant;
+  let merchantSource: Exclude<MerchantSource, "contact"> | undefined = merchantResult?.source;
+
+  // A mangled "Info:/Remarks:" capture (reference numbers, other boilerplate)
+  // is worse than the raw VPA — prefer a real UPI id over an unreliable guess.
+  if (merchantSource === "info-freetext" && merchant && upiId && !looksLikeAName(merchant)) {
+    merchant = undefined;
+    merchantSource = undefined;
+  }
+
+  if (!merchant && upiId) {
+    merchant = upiId;
+    merchantSource = "upi-id";
+  }
+
+  const merchantConfidence = merchantSource ? MERCHANT_SOURCE_CONFIDENCE[merchantSource] : 0;
+
   const referenceNumber = narration.ref ?? extractReference(text);
   const cardLast4 = extractCardLast4(text);
   const channel = extractChannel(text, provider?.channelHint);
@@ -370,6 +443,8 @@ export function parseEmail(email: EmailMessage): ParsedTransaction | null {
     currency: "INR",
     direction,
     merchant,
+    merchantSource,
+    merchantConfidence,
     channel,
     bank: provider?.bank,
     referenceNumber,

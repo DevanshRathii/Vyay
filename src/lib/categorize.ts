@@ -24,10 +24,12 @@ export const DEFAULT_CATEGORIES: Array<{ name: string; color: string }> = [
 ];
 
 /**
- * Built-in merchant knowledge: substring → default category name.
- * User-defined rules always take precedence over these.
+ * Brand-name merchant knowledge: substring → default category name. The most
+ * specific/precise tier — checked before GENERIC_RULES so e.g. "pizza hut"
+ * doesn't get shadowed by the generic "pizza" keyword. User-defined rules
+ * always take precedence over both tiers.
  */
-export const BUILTIN_RULES: Array<{ pattern: string; category: string; exclude?: string }> = [
+export const BRAND_RULES: Array<{ pattern: string; category: string; exclude?: string }> = [
   // Food
   { pattern: "swiggy", category: "Food" },
   { pattern: "zomato", category: "Food" },
@@ -107,7 +109,7 @@ export const BUILTIN_RULES: Array<{ pattern: string; category: string; exclude?:
   { pattern: "mahadiscom", category: "Utilities" },
   { pattern: "electricity", category: "Utilities" },
   { pattern: "broadband", category: "Utilities" },
-  { pattern: "cred", category: "Bills" },
+  { pattern: "cred club", category: "Bills" },
   // Fuel
   { pattern: "hpcl", category: "Fuel" },
   { pattern: "iocl", category: "Fuel" },
@@ -143,6 +145,182 @@ export const BUILTIN_RULES: Array<{ pattern: string; category: string; exclude?:
   { pattern: "insurance", category: "Insurance" },
 ];
 
+/**
+ * Generic category keywords — a broader, lower-precision net for merchants
+ * that don't match a specific brand (e.g. "La Pinoz Pizza" doesn't match the
+ * brand-only "pizza hut" entry). Checked only against merchant/UPI id — never
+ * the email subject, unlike BRAND_RULES — so boilerplate subject text like
+ * "...your HDFC Bank Credit Card" can't false-positive against a keyword like
+ * a brand pattern could. Lower confidence; surfaced in the UI as "auto".
+ */
+export const GENERIC_RULES: Array<{ pattern: string; category: string }> = [
+  // Food
+  { pattern: "pizza", category: "Food" },
+  { pattern: "biryani", category: "Food" },
+  { pattern: "cafe", category: "Food" },
+  { pattern: "coffee", category: "Food" },
+  { pattern: "restaurant", category: "Food" },
+  { pattern: "dhaba", category: "Food" },
+  { pattern: "kitchen", category: "Food" },
+  { pattern: "bakery", category: "Food" },
+  { pattern: "sweets", category: "Food" },
+  { pattern: "chai", category: "Food" },
+  { pattern: "juice", category: "Food" },
+  { pattern: "eatery", category: "Food" },
+  { pattern: "tiffin", category: "Food" },
+  { pattern: "dosa", category: "Food" },
+  { pattern: "idli", category: "Food" },
+  { pattern: "momos", category: "Food" },
+  { pattern: "shawarma", category: "Food" },
+  // Groceries
+  { pattern: "kirana", category: "Groceries" },
+  { pattern: "mart", category: "Groceries" },
+  { pattern: "supermarket", category: "Groceries" },
+  { pattern: "grocery", category: "Groceries" },
+  { pattern: "provision", category: "Groceries" },
+  { pattern: "fresh", category: "Groceries" },
+  // Transport
+  { pattern: "cab", category: "Transport" },
+  { pattern: "taxi", category: "Transport" },
+  { pattern: "parking", category: "Transport" },
+  { pattern: "toll", category: "Transport" },
+  { pattern: "rickshaw", category: "Transport" },
+  // Fuel
+  { pattern: "fuel", category: "Fuel" },
+  { pattern: "petroleum", category: "Fuel" },
+  { pattern: "filling station", category: "Fuel" },
+  // Healthcare
+  { pattern: "hospital", category: "Healthcare" },
+  { pattern: "healthcare", category: "Healthcare" },
+  { pattern: "clinic", category: "Healthcare" },
+  { pattern: "diagnostic", category: "Healthcare" },
+  { pattern: "lab", category: "Healthcare" },
+  { pattern: "medical", category: "Healthcare" },
+  { pattern: "chemist", category: "Healthcare" },
+  { pattern: "dental", category: "Healthcare" },
+  { pattern: "physio", category: "Healthcare" },
+  { pattern: "gym", category: "Healthcare" },
+  { pattern: "fitness", category: "Healthcare" },
+  { pattern: "yoga", category: "Healthcare" },
+  // Travel — "hotel" defaults here: lodging is the common case, and a "Hotel
+  // X" restaurant miscategorized this way is one user rule away from fixed.
+  { pattern: "airlines", category: "Travel" },
+  { pattern: "resort", category: "Travel" },
+  { pattern: "travels", category: "Travel" },
+  { pattern: "tours", category: "Travel" },
+  { pattern: "lodge", category: "Travel" },
+  { pattern: "hotel", category: "Travel" },
+  // Utilities
+  { pattern: "recharge", category: "Utilities" },
+  { pattern: "dth", category: "Utilities" },
+  { pattern: "gas", category: "Utilities" },
+  { pattern: "water bill", category: "Utilities" },
+  // Education
+  { pattern: "school", category: "Education" },
+  { pattern: "college", category: "Education" },
+  { pattern: "academy", category: "Education" },
+  { pattern: "institute", category: "Education" },
+  { pattern: "coaching", category: "Education" },
+  { pattern: "tuition", category: "Education" },
+  { pattern: "classes", category: "Education" },
+  // Insurance
+  { pattern: "premium", category: "Insurance" },
+  { pattern: "policy", category: "Insurance" },
+  // Investment
+  { pattern: "sip", category: "Investment" },
+  { pattern: "securities", category: "Investment" },
+  { pattern: "broking", category: "Investment" },
+  { pattern: "demat", category: "Investment" },
+  // Rent
+  { pattern: "rent", category: "Rent" },
+  // Entertainment
+  { pattern: "cinema", category: "Entertainment" },
+  { pattern: "movies", category: "Entertainment" },
+  { pattern: "gaming", category: "Entertainment" },
+  { pattern: "club", category: "Entertainment" },
+];
+
+/**
+ * A curated alias map for well-known brands: normalized merchant text →
+ * clean display name. Checked at ingest/reparse time (see ingest.ts) against
+ * `merchantNormalized`, overriding a mangled or corporate-suffixed extraction
+ * ("Uber India Systems" → "Uber") with a confidence bump to 0.95. Not used by
+ * categorize() itself — this is purely a display/confidence concern.
+ */
+export const KNOWN_MERCHANTS: Record<string, string> = {
+  swiggy: "Swiggy",
+  zomato: "Zomato",
+  dominos: "Domino's",
+  mcdonald: "McDonald's",
+  kfc: "KFC",
+  starbucks: "Starbucks",
+  blinkit: "Blinkit",
+  zepto: "Zepto",
+  bigbasket: "BigBasket",
+  instamart: "Swiggy Instamart",
+  dmart: "DMart",
+  jiomart: "JioMart",
+  amazon: "Amazon",
+  flipkart: "Flipkart",
+  myntra: "Myntra",
+  ajio: "Ajio",
+  meesho: "Meesho",
+  nykaa: "Nykaa",
+  decathlon: "Decathlon",
+  croma: "Croma",
+  ikea: "IKEA",
+  uber: "Uber",
+  ola: "Ola",
+  rapido: "Rapido",
+  blusmart: "BluSmart",
+  irctc: "IRCTC",
+  redbus: "redBus",
+  makemytrip: "MakeMyTrip",
+  goibibo: "Goibibo",
+  cleartrip: "Cleartrip",
+  ixigo: "ixigo",
+  indigo: "IndiGo",
+  vistara: "Vistara",
+  oyo: "OYO",
+  airbnb: "Airbnb",
+  bookmyshow: "BookMyShow",
+  netflix: "Netflix",
+  spotify: "Spotify",
+  hotstar: "Disney+ Hotstar",
+  zerodha: "Zerodha",
+  groww: "Groww",
+  upstox: "Upstox",
+  apollo: "Apollo Pharmacy",
+  pharmeasy: "PharmEasy",
+  netmeds: "Netmeds",
+  practo: "Practo",
+};
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface CompiledRule {
+  re: RegExp;
+  category: string;
+  exclude?: string;
+}
+
+/** Word-boundary regex per pattern, longest-pattern-first so e.g. "pizza hut"
+ * (brand) is tried before a shorter overlapping pattern would ever matter. */
+function compileRules(rules: Array<{ pattern: string; category: string; exclude?: string }>): CompiledRule[] {
+  return [...rules]
+    .sort((a, b) => b.pattern.length - a.pattern.length)
+    .map((r) => ({
+      re: new RegExp(String.raw`\b${escapeRegExp(r.pattern)}\b`, "i"),
+      category: r.category,
+      exclude: r.exclude,
+    }));
+}
+
+const COMPILED_BRAND_RULES = compileRules(BRAND_RULES);
+const COMPILED_GENERIC_RULES = compileRules(GENERIC_RULES);
+
 export async function ensureDefaultCategories(userId: string): Promise<void> {
   const existing = await db.select().from(categories).where(eq(categories.userId, userId));
   if (existing.length > 0) return;
@@ -167,35 +345,54 @@ export async function loadCategorizerContext(userId: string): Promise<Categorize
   };
 }
 
+export type CategorySource = "user" | "brand" | "generic";
+
+export interface CategorizeResult {
+  categoryId: string | null;
+  source: CategorySource | null;
+}
+
 /**
- * Pick a category for a transaction. User rules win over built-ins; both
- * match a lowercase substring against merchant, UPI id and subject.
+ * Pick a category for a transaction. Resolution order: user rules → brand
+ * rules → generic keywords. User and brand rules match word-boundary
+ * substrings against merchant, UPI id, *and subject*; generic keywords match
+ * only merchant/UPI id — never the subject, so boilerplate subject text can't
+ * false-positive against a broad keyword the way it could against `subject`.
  */
 export function categorize(
   ctx: CategorizerContext,
   fields: { merchantNormalized?: string | null; merchant?: string | null; upiId?: string | null; subject?: string | null },
-): string | null {
-  const haystack = [fields.merchantNormalized, fields.merchant, fields.upiId, fields.subject]
+): CategorizeResult {
+  const brandHaystack = [fields.merchantNormalized, fields.merchant, fields.upiId, fields.subject]
     .filter(Boolean)
     .join(" | ")
     .toLowerCase();
-  if (!haystack) return null;
+  if (!brandHaystack) return { categoryId: null, source: null };
   // Space-collapsed so an exclude like "amazonpay" catches both a squashed
   // VPA local-part ("amazonpay@apl") and spaced-out merchant text ("Amazon Pay").
-  const haystackNoSpace = haystack.replace(/\s+/g, "");
+  const brandHaystackNoSpace = brandHaystack.replace(/\s+/g, "");
+  const genericHaystack = [fields.merchantNormalized, fields.merchant, fields.upiId]
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
 
   for (const rule of ctx.userRules) {
-    if (haystack.includes(rule.pattern.toLowerCase()) && ctx.categoriesById.has(rule.categoryId)) {
-      return rule.categoryId;
+    if (brandHaystack.includes(rule.pattern.toLowerCase()) && ctx.categoriesById.has(rule.categoryId)) {
+      return { categoryId: rule.categoryId, source: "user" };
     }
   }
-  for (const rule of BUILTIN_RULES) {
-    if (!haystack.includes(rule.pattern)) continue;
-    if (rule.exclude && haystackNoSpace.includes(rule.exclude)) continue;
+  for (const rule of COMPILED_BRAND_RULES) {
+    if (!rule.re.test(brandHaystack)) continue;
+    if (rule.exclude && brandHaystackNoSpace.includes(rule.exclude)) continue;
     const id = ctx.categoryIdByLowerName.get(rule.category.toLowerCase());
-    if (id) return id;
+    if (id) return { categoryId: id, source: "brand" };
   }
-  return null;
+  for (const rule of COMPILED_GENERIC_RULES) {
+    if (!rule.re.test(genericHaystack)) continue;
+    const id = ctx.categoryIdByLowerName.get(rule.category.toLowerCase());
+    if (id) return { categoryId: id, source: "generic" };
+  }
+  return { categoryId: null, source: null };
 }
 
 export async function findCategoryByName(userId: string, name: string): Promise<Category | undefined> {
