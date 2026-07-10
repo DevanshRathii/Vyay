@@ -13,7 +13,8 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
 import { cn, formatINR } from "@/lib/utils";
@@ -77,9 +78,10 @@ function fmtTime(ms: number) {
   return new Date(ms).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
 }
 
-export function Ledger() {
+function LedgerInner() {
+  const initialCategory = useSearchParams().get("category") ?? "";
   const [q, setQ] = useState("");
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState(initialCategory);
   const [channel, setChannel] = useState("");
   const [direction, setDirection] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
@@ -425,6 +427,14 @@ export function Ledger() {
         setEditing(null);
       }} />
     </div>
+  );
+}
+
+export function Ledger() {
+  return (
+    <Suspense>
+      <LedgerInner />
+    </Suspense>
   );
 }
 
