@@ -107,7 +107,7 @@ export function CategoryManager() {
         </div>
       )}
 
-      <Card>
+      <Card data-tour="categories-list">
         <CardHeader
           title="Categories"
           subtitle="Used across the ledger, analytics, and the Apple Shortcut"

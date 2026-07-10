@@ -159,7 +159,7 @@ export function Dashboard() {
         </Select>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div data-tour="overview-stats" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label="Spent"
           value={formatINR(totals.debit)}
