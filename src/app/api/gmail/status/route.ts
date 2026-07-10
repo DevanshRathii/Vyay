@@ -14,6 +14,14 @@ export async function GET() {
     await db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).limit(1)
   )[0];
   const hasProgress = conn?.syncStatus === "syncing" && conn.syncProgressPhase != null;
+  let selectedProviders: string[] | null = null;
+  if (conn?.selectedProviders) {
+    try {
+      selectedProviders = JSON.parse(conn.selectedProviders);
+    } catch {
+      selectedProviders = null;
+    }
+  }
   return NextResponse.json({
     oauthConfigured: gmailOauthConfigured(),
     connected: Boolean(conn),
@@ -23,6 +31,8 @@ export async function GET() {
     lastSyncAt: conn?.lastSyncAt ?? null,
     initialSyncDone: Boolean(conn?.initialSyncDone),
     totalSynced: conn?.totalSynced ?? 0,
+    /** null = every provider in the registry is being watched */
+    selectedProviders,
     syncProgress: hasProgress
       ? {
           phase: conn!.syncProgressPhase as "listing" | "ingesting",

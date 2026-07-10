@@ -41,6 +41,8 @@ interface GmailStatus {
   initialSyncDone: boolean;
   totalSynced: number;
   syncProgress: { phase: "listing" | "ingesting"; processed: number; total: number } | null;
+  /** null = every provider in the registry is being watched */
+  selectedProviders: string[] | null;
 }
 
 interface TokenRow {
@@ -263,6 +265,18 @@ function GmailCard() {
                     />
                   </span>
                 )}
+                <p className="mt-1 text-[11px] text-muted">
+                  {data.selectedProviders === null ? (
+                    <>Watching all {PROVIDERS.length} banks &amp; payment apps in the registry.</>
+                  ) : (
+                    <>
+                      Watching {data.selectedProviders.length} of {PROVIDERS.length} banks &amp; apps:{" "}
+                      {data.selectedProviders.map((id) => PROVIDERS.find((p) => p.id === id)?.name ?? id).join(", ")}.
+                      Any other bank, credit card, or payment app won&apos;t be picked up — that&apos;s why sync may
+                      have felt faster. Disconnect and reconnect to change this selection.
+                    </>
+                  )}
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button size="sm" variant="secondary" disabled={syncing} onClick={() => syncNow(false)}>
