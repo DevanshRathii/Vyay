@@ -1,10 +1,19 @@
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 
 /** Returns the signed-in user's id, or null. */
 export async function getUserId(): Promise<string | null> {
   const session = await auth();
   return session?.user?.id ?? null;
+}
+
+/** Null means the user hasn't onboarded onto zero-access encryption yet. */
+export async function getUserPublicKey(userId: string): Promise<string | null> {
+  const row = (await db.select({ publicKey: users.publicKey }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  return row?.publicKey ?? null;
 }
 
 /** True if the signed-in user is the app owner (ADMIN_EMAIL). No DB round

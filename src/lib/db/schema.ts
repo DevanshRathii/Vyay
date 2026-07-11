@@ -35,6 +35,15 @@ export const users = pgTable("users", {
    *  to the Google Cloud Console OAuth "Test users" list — that second,
    *  manual step has no public API and can't be automated from here. */
   gmailAccessGranted: boolean("gmail_access_granted").notNull().default(false),
+  /** X25519 public key, base64url. Null = not onboarded onto zero-access
+   *  encryption yet (legacy plaintext path). Set once at setup and never
+   *  changed except by the key-reset flow. */
+  publicKey: text("public_key"),
+  /** sealForUser(publicKey, { check: "vyay-key-check-v1" }) — lets the
+   *  client verify a pasted/loaded personal key without the server ever
+   *  seeing the private key. */
+  keyCheck: text("key_check"),
+  keyCreatedAt: epochMs("key_created_at"),
   createdAt: now(),
 });
 
@@ -96,8 +105,9 @@ export const transactions = pgTable(
     source: text("source").notNull().default("gmail"), // gmail | manual | seed
     /** transaction time, ms epoch */
     occurredAt: epochMs("occurred_at").notNull(),
-    /** stored in paise to avoid floating point issues; bigint so very large transfers fit */
-    amountPaise: bigint("amount_paise", { mode: "number" }).notNull(),
+    /** stored in paise to avoid floating point issues; bigint so very large
+     *  transfers fit. Null for keyed users — amount lives inside encPayload. */
+    amountPaise: bigint("amount_paise", { mode: "number" }),
     currency: text("currency").notNull().default("INR"),
     direction: text("direction").notNull(), // debit | credit
     merchant: text("merchant"),
@@ -121,6 +131,13 @@ export const transactions = pgTable(
     raw: text("raw"),
     /** id of the transaction this one appears to duplicate */
     duplicateOfId: text("duplicate_of_id"),
+    /** sealForUser(user.publicKey, {...sensitive fields}) — set for keyed
+     *  users instead of the plaintext columns above (which are then null). */
+    encPayload: text("enc_payload"),
+    /** blind-index HMAC of (userId, direction, amountPaise) — see
+     *  src/lib/blind-index.ts. Lets keyed-user dedup/matching run an
+     *  equality query without a plaintext amount column. */
+    amountBidx: text("amount_bidx"),
     deletedAt: epochMs("deleted_at"),
     createdAt: now(),
     updatedAt: epochMs("updated_at")
@@ -132,6 +149,7 @@ export const transactions = pgTable(
     index("txn_user_time_idx").on(t.userId, t.occurredAt),
     index("txn_user_amount_idx").on(t.userId, t.amountPaise),
     index("txn_user_category_idx").on(t.userId, t.categoryId),
+    index("txn_user_bidx_idx").on(t.userId, t.amountBidx),
   ],
 );
 
@@ -198,11 +216,16 @@ export const shortcutEvents = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    amountPaise: bigint("amount_paise", { mode: "number" }).notNull(),
+    /** Null for keyed users — amount lives inside encPayload. */
+    amountPaise: bigint("amount_paise", { mode: "number" }),
     direction: text("direction").notNull().default("debit"),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
     categoryName: text("category_name").notNull(),
     notes: text("notes"),
+    /** sealForUser(user.publicKey, { amountPaise, notes }) for keyed users. */
+    encPayload: text("enc_payload"),
+    /** blind-index HMAC of (userId, direction, amountPaise) — see amount_bidx on transactions. */
+    amountBidx: text("amount_bidx"),
     status: text("status").notNull().default("pending"), // pending | matched | resolved | dismissed
     matchedTransactionId: text("matched_transaction_id"),
     createdAt: now(),

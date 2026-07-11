@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { gmail_v1 } from "@googleapis/gmail";
 import { db } from "@/lib/db";
-import { gmailConnections, transactions, type GmailConnection } from "@/lib/db/schema";
+import { gmailConnections, transactions, users, type GmailConnection } from "@/lib/db/schema";
 import { loadCategorizerContext } from "@/lib/categorize";
 import { loadContactContext } from "@/lib/contacts/match";
 import { ingestEmail } from "@/lib/ingest";
@@ -115,6 +115,11 @@ async function fetchAndIngest(
 ): Promise<{ inserted: number; skipped: number; complete: boolean }> {
   const ctx = await loadCategorizerContext(conn.userId);
   const contactCtx = await loadContactContext(conn.userId);
+  // One users query per sync run (not per message) — cron sync is unattended,
+  // so a keyed user's mail is sealed with their stored public key without
+  // needing them present.
+  const user = (await db.select({ publicKey: users.publicKey }).from(users).where(eq(users.id, conn.userId)).limit(1))[0];
+  const publicKey = user?.publicKey ?? null;
   let inserted = 0;
   let skipped = 0;
   let processed = 0;
@@ -130,7 +135,7 @@ async function fetchAndIngest(
     }
     const res = await withRetry(() => gmail.users.messages.get({ userId: "me", id, format: "full" }));
     const email = toEmailMessage(res.data);
-    const outcome = await ingestEmail(conn.userId, email, ctx, contactCtx);
+    const outcome = await ingestEmail(conn.userId, email, ctx, contactCtx, publicKey);
     if (outcome.status === "inserted") inserted++;
     else skipped++;
     processed++;

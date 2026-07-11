@@ -57,3 +57,75 @@ export function buildTransactionFilters(userId: string, params: URLSearchParams)
 
   return conds;
 }
+
+/** Row shape the client-side ledger predicate operates on — a subset of
+ *  DecryptedTxn (src/lib/use-transactions.ts), kept dependency-free here so
+ *  this file stays safe to import from the client bundle. */
+export interface LedgerFilterRow {
+  merchant: string | null;
+  merchantNormalized: string | null;
+  notes: string | null;
+  upiId: string | null;
+  emailSubject: string | null;
+  referenceNumber: string | null;
+  categoryId: string | null;
+  merchantConfidence: number | null;
+  categorySource: string | null;
+  channel: string | null;
+  direction: string;
+  occurredAt: number;
+  deletedAt: number | null;
+}
+
+export interface LedgerFilters {
+  q?: string;
+  category?: string;
+  channel?: string;
+  direction?: string;
+  onlyDeleted?: boolean;
+  includeDeleted?: boolean;
+  lowConfidence?: boolean;
+  categorySource?: string;
+  from?: number;
+  to?: number;
+}
+
+/**
+ * Client-side port of buildTransactionFilters, for the keyed ledger's
+ * useMemo predicates (server-side filtering isn't possible once the rows
+ * are ciphertext). Semantics — including lowercase substring matching —
+ * are kept identical to the SQL version above.
+ */
+export function matchesLedgerFilters(t: LedgerFilterRow, f: LedgerFilters): boolean {
+  if (f.onlyDeleted) {
+    if (t.deletedAt == null) return false;
+  } else if (!f.includeDeleted) {
+    if (t.deletedAt != null) return false;
+  }
+
+  const q = f.q?.trim().toLowerCase();
+  if (q) {
+    const hay = [t.merchant, t.merchantNormalized, t.notes, t.upiId, t.emailSubject, t.referenceNumber]
+      .filter((v): v is string => v != null)
+      .map((v) => v.toLowerCase());
+    if (!hay.some((v) => v.includes(q))) return false;
+  }
+
+  if (f.category === "uncategorized") {
+    if (t.categoryId != null) return false;
+  } else if (f.category) {
+    if (t.categoryId !== f.category) return false;
+  }
+
+  if (f.lowConfidence) {
+    if (t.merchantConfidence == null || t.merchantConfidence >= LOW_MERCHANT_CONFIDENCE) return false;
+  }
+
+  if (f.categorySource === "generic" && t.categorySource !== "generic") return false;
+  if (f.channel && t.channel !== f.channel) return false;
+  if ((f.direction === "debit" || f.direction === "credit") && t.direction !== f.direction) return false;
+  if (f.from && t.occurredAt < f.from) return false;
+  if (f.to && t.occurredAt > f.to) return false;
+
+  return true;
+}

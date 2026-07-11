@@ -59,6 +59,10 @@ function LoginInner({ googleEnabled }: { googleEnabled: boolean }) {
           Take a 2-minute tour
         </Button>
       </Link>
+      <p className="mt-4 text-center text-[11px] leading-relaxed text-muted">
+        Your transactions are sealed with a key only you hold. A database breach — or even Vyay&apos;s operator —
+        cannot read your financial data.
+      </p>
     </AuthCard>
   );
 }
