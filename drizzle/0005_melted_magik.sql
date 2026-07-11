@@ -1,10 +1,8 @@
-CREATE TABLE "feedback_messages" (
-	"id" text PRIMARY KEY NOT NULL,
-	"user_id" text NOT NULL,
-	"message" text NOT NULL,
-	"resolved" boolean DEFAULT false NOT NULL,
-	"created_at" bigint NOT NULL
-);
---> statement-breakpoint
-ALTER TABLE "feedback_messages" ADD CONSTRAINT "feedback_messages_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "feedback_user_idx" ON "feedback_messages" USING btree ("user_id");
+-- feedback_messages (table + FK + index) was already created by an earlier,
+-- since-superseded version of this migration file, applied to the database
+-- via an automatic Vercel preview-deployment build (MIGRATE_DATABASE_URL is
+-- shared between Preview and Production) before this file was regenerated.
+-- That earlier version also added users.approved, which this branch later
+-- decided not to keep — clean it up here since the column-add itself already
+-- landed for real and schema.ts no longer declares it.
+ALTER TABLE "users" DROP COLUMN IF EXISTS "approved";
