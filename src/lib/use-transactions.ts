@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import useSWR from "swr";
-import { useE2E } from "@/components/e2e-provider";
+import { useE2EOptional } from "@/components/e2e-provider";
 import type { TransactionEncPayload } from "@/lib/ingest";
 
 /** The exact row shape Ledger/Dashboard/Matches already expect — decrypted
@@ -46,16 +46,19 @@ interface TransactionsResponse {
 /**
  * Fetches the whole (keyed) transaction list once and decrypts every row
  * client-side. Only meaningful once KeyProvider reports `ready` — callers
- * should gate on that themselves (see Ledger/Dashboard/Matches).
+ * should gate on that themselves (see Ledger/Dashboard/Matches). Safe to
+ * call unconditionally even outside a KeyProvider (e.g. /demo, which never
+ * mounts one) — it just returns no rows in that case.
  */
 export function useTransactions() {
-  const { decrypt, seal, status } = useE2E();
+  const e2e = useE2EOptional();
+  const ready = e2e?.status === "ready";
   const { data, isLoading, isValidating, mutate } = useSWR<TransactionsResponse>(
-    status === "ready" ? "/api/transactions" : null,
+    ready ? "/api/transactions" : null,
   );
 
   const rows = useMemo<DecryptedTxn[]>(() => {
-    if (!data) return [];
+    if (!data || !e2e) return [];
     return data.rows.map((row) => {
       if (!row.encPayload) {
         // Dual-read: a row with plaintext fields already present (a
@@ -63,7 +66,7 @@ export function useTransactions() {
         // untouched.
         return { ...row, amountPaise: row.amountPaise ?? 0 };
       }
-      const payload = decrypt<TransactionEncPayload>(row.encPayload);
+      const payload = e2e.decrypt<TransactionEncPayload>(row.encPayload);
       return {
         ...row,
         amountPaise: payload.amountPaise,
@@ -78,21 +81,22 @@ export function useTransactions() {
         channel: payload.channel,
       };
     });
-  }, [data, decrypt]);
+  }, [data, e2e]);
 
   /**
    * Re-seals a keyed transaction's encPayload with `updates` merged in
    * (e.g. edited notes) — decrypts the original ciphertext fresh so fields
    * not shown in the UI (like `raw`, the original email) survive the
    * round-trip instead of being silently dropped. Returns undefined for a
-   * dual-read plaintext row (nothing to re-seal — PATCH the plaintext
-   * column directly instead) or when the row can't be found.
+   * dual-read plaintext row, when the row can't be found, or outside a
+   * KeyProvider (nothing to re-seal — PATCH the plaintext column directly).
    */
   function reseal(id: string, updates: Partial<TransactionEncPayload>): string | undefined {
+    if (!e2e) return undefined;
     const row = data?.rows.find((r) => r.id === id);
     if (!row?.encPayload) return undefined;
-    const payload = decrypt<TransactionEncPayload>(row.encPayload);
-    return seal({ ...payload, ...updates });
+    const payload = e2e.decrypt<TransactionEncPayload>(row.encPayload);
+    return e2e.seal({ ...payload, ...updates });
   }
 
   return { rows, isLoading, isValidating, mutate, reseal };
