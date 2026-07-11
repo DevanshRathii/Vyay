@@ -178,60 +178,63 @@ function LedgerInner() {
   return (
     <div className="flex flex-col gap-4">
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div data-tour="ledger-search" className="relative min-w-0 flex-1 sm:max-w-xs">
+      <div className="flex flex-col gap-3">
+        <div data-tour="ledger-search" className="relative">
           {isValidating ? (
-            <Spinner className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+            <Spinner className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2" />
           ) : (
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           )}
           <Input
-            placeholder="Search merchant, notes, ref…"
+            placeholder="Search by merchant, notes, or reference number…"
             value={q}
             onChange={(e) => resetFilters(() => setQ(e.target.value))}
-            className="pl-9"
+            className="w-full pl-10"
             aria-label="Search transactions"
           />
         </div>
-        <Select value={category} onChange={(e) => resetFilters(() => setCategory(e.target.value))} aria-label="Category filter">
-          <option value="">All categories</option>
-          <option value="uncategorized">Uncategorized</option>
-          {cats?.rows.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
-        <Select value={channel} onChange={(e) => resetFilters(() => setChannel(e.target.value))} aria-label="Channel filter">
-          <option value="">All channels</option>
-          {CHANNELS.map((c) => (
-            <option key={c}>{c}</option>
-          ))}
-        </Select>
-        <Select value={direction} onChange={(e) => resetFilters(() => setDirection(e.target.value))} aria-label="Direction filter">
-          <option value="">Debit + credit</option>
-          <option value="debit">Debits</option>
-          <option value="credit">Credits</option>
-        </Select>
-        <Button variant={showDeleted ? "primary" : "secondary"} size="sm" onClick={() => resetFilters(() => setShowDeleted((v) => !v))}>
-          <Trash2 className="h-3.5 w-3.5" /> Deleted
-        </Button>
-        <Button
-          variant={lowConfidence ? "primary" : "secondary"}
-          size="sm"
-          onClick={() => resetFilters(() => setLowConfidence((v) => !v))}
-          title="Merchant name is a guess — needs verifying"
-        >
-          <AlertTriangle className="h-3.5 w-3.5" /> Low-confidence
-        </Button>
-        <Button
-          variant={autoCategorized ? "primary" : "secondary"}
-          size="sm"
-          onClick={() => resetFilters(() => setAutoCategorized((v) => !v))}
-          title="Category assigned by a broad generic keyword, not a specific brand"
-        >
-          <Sparkles className="h-3.5 w-3.5" /> Auto-categorized
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={category} onChange={(e) => resetFilters(() => setCategory(e.target.value))} aria-label="Category filter">
+            <option value="">All categories</option>
+            <option value="uncategorized">Uncategorized</option>
+            {cats?.rows.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+          <Select value={channel} onChange={(e) => resetFilters(() => setChannel(e.target.value))} aria-label="Channel filter">
+            <option value="">All channels</option>
+            {CHANNELS.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </Select>
+          <Select value={direction} onChange={(e) => resetFilters(() => setDirection(e.target.value))} aria-label="Direction filter">
+            <option value="">Debit + credit</option>
+            <option value="debit">Debits</option>
+            <option value="credit">Credits</option>
+          </Select>
+          <span className="mx-1 hidden h-5 w-px bg-line sm:block" aria-hidden />
+          <Button variant={showDeleted ? "primary" : "secondary"} size="sm" onClick={() => resetFilters(() => setShowDeleted((v) => !v))}>
+            <Trash2 className="h-3.5 w-3.5" /> Deleted
+          </Button>
+          <Button
+            variant={lowConfidence ? "primary" : "secondary"}
+            size="sm"
+            onClick={() => resetFilters(() => setLowConfidence((v) => !v))}
+            title="Merchant name is a guess — needs verifying"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" /> Low-confidence
+          </Button>
+          <Button
+            variant={autoCategorized ? "primary" : "secondary"}
+            size="sm"
+            onClick={() => resetFilters(() => setAutoCategorized((v) => !v))}
+            title="Category assigned by a broad generic keyword, not a specific brand"
+          >
+            <Sparkles className="h-3.5 w-3.5" /> Auto-categorized
+          </Button>
+        </div>
       </div>
 
       {/* Desktop table */}
