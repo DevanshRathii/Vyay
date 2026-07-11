@@ -215,24 +215,22 @@ function LedgerInner() {
             <option value="credit">Credits</option>
           </Select>
           <span className="mx-1 hidden h-5 w-px bg-line sm:block" aria-hidden />
-          <Button variant={showDeleted ? "primary" : "secondary"} size="sm" onClick={() => resetFilters(() => setShowDeleted((v) => !v))}>
-            <Trash2 className="h-3.5 w-3.5" /> Deleted
+          <Button variant={showDeleted ? "primary" : "secondary"} onClick={() => resetFilters(() => setShowDeleted((v) => !v))}>
+            <Trash2 className="h-4 w-4" /> Deleted
           </Button>
           <Button
             variant={lowConfidence ? "primary" : "secondary"}
-            size="sm"
             onClick={() => resetFilters(() => setLowConfidence((v) => !v))}
             title="Merchant name is a guess — needs verifying"
           >
-            <AlertTriangle className="h-3.5 w-3.5" /> Low-confidence
+            <AlertTriangle className="h-4 w-4" /> Low-confidence
           </Button>
           <Button
             variant={autoCategorized ? "primary" : "secondary"}
-            size="sm"
             onClick={() => resetFilters(() => setAutoCategorized((v) => !v))}
             title="Category assigned by a broad generic keyword, not a specific brand"
           >
-            <Sparkles className="h-3.5 w-3.5" /> Auto-categorized
+            <Sparkles className="h-4 w-4" /> Auto-categorized
           </Button>
         </div>
       </div>

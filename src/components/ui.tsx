@@ -123,9 +123,13 @@ export function Select({ className, children, ...props }: React.SelectHTMLAttrib
   return (
     <select
       className={cn(
-        "h-9.5 rounded-xl border border-line bg-card px-3 pr-8 text-sm text-fg",
-        "appearance-none bg-no-repeat bg-[right_0.6rem_center] bg-[length:14px]",
+        // Pill shape + height match Button exactly, so a select and a toggle
+        // button sitting in the same filter row read as one control family
+        // instead of two different UI languages.
+        "h-9.5 rounded-full border border-line bg-card-2 pl-4 pr-9 text-sm font-medium text-fg",
+        "appearance-none bg-no-repeat bg-[right_0.85rem_center] bg-[length:13px]",
         "bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%236e6e73%22 stroke-width=%222.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22m6 9 6 6 6-6%22/%3E%3C/svg%3E')]",
+        "transition-colors hover:bg-line/60",
         "focus:border-accent focus:outline-none",
         className,
       )}
