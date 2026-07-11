@@ -15,6 +15,9 @@ import {
 } from "recharts";
 import useSWR from "swr";
 import { Button, Card, CardHeader, Empty, Select, Spinner } from "@/components/ui";
+import { useE2EOptional } from "@/components/e2e-provider";
+import { computeAnalytics, type AnalyticsRow, type CategoryLite } from "@/lib/analytics-core";
+import { useTransactions } from "@/lib/use-transactions";
 import { cn, formatINR } from "@/lib/utils";
 
 interface Analytics {
@@ -175,6 +178,7 @@ export function Dashboard() {
   const [range, setRange] = useState<string>("month");
   const [slice, setSlice] = useState<Slice>(EMPTY_SLICE);
   const { from, to } = useMemo(() => rangeToMs(range), [range]);
+  const keyed = useE2EOptional()?.status === "ready";
 
   const analyticsUrl = useMemo(() => {
     const p = new URLSearchParams({ from: String(from), to: String(to) });
@@ -183,7 +187,39 @@ export function Dashboard() {
     if (slice.merchantKey !== null) p.set("merchant", slice.merchantKey);
     return `/api/analytics?${p.toString()}`;
   }, [from, to, slice]);
-  const { data, isLoading, isValidating } = useSWR<Analytics>(analyticsUrl, { keepPreviousData: true });
+  const server = useSWR<Analytics>(!keyed ? analyticsUrl : null, { keepPreviousData: true });
+
+  // Keyed: no server aggregation possible over ciphertext — compute the same
+  // shape client-side from decrypted rows (shared computeAnalytics core).
+  const { rows: txnRows, isLoading: txnLoading } = useTransactions();
+  const { data: catsData } = useSWR<{ rows: CategoryLite[] }>(keyed ? "/api/categories" : null);
+  const clientAnalytics = useMemo<Analytics | null>(() => {
+    if (!keyed || !catsData) return null;
+    const yearAgo = Date.now() - 366 * 24 * 3600 * 1000;
+    const analyticsRows: AnalyticsRow[] = txnRows
+      .filter((t) => t.deletedAt == null)
+      .map((t) => ({
+        occurredAt: t.occurredAt,
+        amountPaise: t.amountPaise,
+        direction: t.direction,
+        categoryId: t.categoryId,
+        channel: t.channel,
+        merchant: t.merchantNormalized ?? null,
+        merchantRaw: t.merchant,
+      }));
+    return computeAnalytics(analyticsRows, catsData.rows, {
+      from,
+      to,
+      yearAgo,
+      filterCategory: slice.categoryId,
+      filterChannel: slice.channel,
+      filterMerchant: slice.merchantKey,
+    });
+  }, [keyed, catsData, txnRows, from, to, slice]);
+
+  const data = keyed ? clientAnalytics : server.data;
+  const isLoading = keyed ? txnLoading || !catsData : server.isLoading;
+  const isValidating = keyed ? false : server.isValidating;
 
   const sliceActive = slice.categoryId !== null || slice.channel !== null || slice.merchantKey !== null;
   const ledgerHref = useMemo(() => {

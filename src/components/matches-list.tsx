@@ -1,9 +1,10 @@
 "use client";
 
 import { Check, GitMerge, X } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, Empty, Spinner } from "@/components/ui";
+import { useE2EOptional } from "@/components/e2e-provider";
 import { cn, formatINR } from "@/lib/utils";
 
 interface Candidate {
@@ -12,18 +13,44 @@ interface Candidate {
   merchant: string | null;
   channel: string | null;
   bank: string | null;
-  amountPaise: number;
+  amountPaise: number | null;
+  encPayload?: string | null;
   categoryId: string | null;
 }
 
 interface PendingEvent {
   id: string;
   createdAt: number;
-  amountPaise: number;
+  amountPaise: number | null;
+  encPayload?: string | null;
   direction: string;
   categoryName: string;
   notes: string | null;
   candidates: Candidate[];
+}
+
+/** Decrypts amount/notes (event) or amount/merchant (candidate) when the row
+ *  carries ciphertext instead of plaintext columns — pass-through otherwise. */
+function useDecryptedMatches(rows: PendingEvent[] | undefined) {
+  const e2e = useE2EOptional();
+  return useMemo(() => {
+    if (!rows) return undefined;
+    const decrypt = e2e?.status === "ready" ? e2e.decrypt : null;
+    return rows.map((e) => {
+      const event =
+        e.encPayload && decrypt
+          ? { ...e, ...decrypt<{ amountPaise: number; notes: string | null }>(e.encPayload) }
+          : { ...e, amountPaise: e.amountPaise ?? 0 };
+      return {
+        ...event,
+        candidates: e.candidates.map((c) =>
+          c.encPayload && decrypt
+            ? { ...c, ...decrypt<{ amountPaise: number; merchant: string | null }>(c.encPayload) }
+            : { ...c, amountPaise: c.amountPaise ?? 0 },
+        ),
+      };
+    });
+  }, [rows, e2e]);
 }
 
 function fmt(ms: number) {
@@ -38,6 +65,7 @@ function fmt(ms: number) {
 
 export function MatchesList() {
   const { data, mutate } = useSWR<{ rows: PendingEvent[] }>("/api/matches");
+  const rows = useDecryptedMatches(data?.rows);
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, string>>({});
 
@@ -52,7 +80,7 @@ export function MatchesList() {
     mutate();
   }
 
-  if (!data) {
+  if (!rows) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Spinner className="h-6 w-6" />
@@ -60,7 +88,7 @@ export function MatchesList() {
     );
   }
 
-  if (data.rows.length === 0) {
+  if (rows.length === 0) {
     return (
       <Card>
         <Empty
@@ -74,7 +102,7 @@ export function MatchesList() {
 
   return (
     <div data-tour="matches-list" className="flex flex-col gap-3">
-      {data.rows.map((e) => {
+      {rows.map((e) => {
         const chosen = selected[e.id] ?? (e.candidates.length === 1 ? e.candidates[0].id : "");
         return (
           <Card key={e.id} className="p-4">

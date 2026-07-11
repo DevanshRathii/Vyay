@@ -17,6 +17,9 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
+import { useE2EOptional } from "@/components/e2e-provider";
+import { matchesLedgerFilters } from "@/lib/transactions";
+import { useTransactions, type DecryptedTxn } from "@/lib/use-transactions";
 import { cn, formatINR } from "@/lib/utils";
 
 interface Txn {
@@ -94,6 +97,9 @@ function LedgerInner() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Txn | null>(null);
 
+  const PAGE_SIZE = 50;
+  const keyed = useE2EOptional()?.status === "ready";
+
   const query = useMemo(() => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
@@ -106,14 +112,57 @@ function LedgerInner() {
     p.set("sort", sort.key);
     p.set("dir", sort.dir);
     p.set("page", String(page));
-    p.set("pageSize", "50");
+    p.set("pageSize", String(PAGE_SIZE));
     return p.toString();
   }, [q, category, channel, direction, showDeleted, lowConfidence, autoCategorized, sort, page]);
 
-  const { data, isLoading, isValidating, mutate } = useSWR<{ rows: Txn[]; total: number; pageSize: number }>(
-    `/api/transactions?${query}`,
+  // Non-keyed (and /demo): unchanged — server-side filter/sort/paginate.
+  const server = useSWR<{ rows: Txn[]; total: number; pageSize: number }>(
+    !keyed ? `/api/transactions?${query}` : null,
     { keepPreviousData: true },
   );
+
+  // Keyed: fetch everything once, decrypt, and filter/sort/paginate in JS —
+  // the server can't evaluate a substring search against ciphertext.
+  const client = useTransactions();
+  const clientFiltered = useMemo(() => {
+    if (!keyed) return [];
+    const filtered = client.rows.filter((t) =>
+      matchesLedgerFilters(t, {
+        q,
+        category,
+        channel,
+        direction,
+        onlyDeleted: showDeleted,
+        lowConfidence,
+        categorySource: autoCategorized ? "generic" : undefined,
+      }),
+    );
+    const dir = sort.dir === "asc" ? 1 : -1;
+    filtered.sort((a, b) => {
+      const av = a[sort.key as keyof DecryptedTxn];
+      const bv = b[sort.key as keyof DecryptedTxn];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+    return filtered;
+  }, [keyed, client.rows, q, category, channel, direction, showDeleted, lowConfidence, autoCategorized, sort]);
+
+  const data = keyed
+    ? {
+        rows: clientFiltered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+        total: clientFiltered.length,
+        pageSize: PAGE_SIZE,
+      }
+    : server.data;
+  const isLoading = keyed ? client.isLoading : server.isLoading;
+  const isValidating = keyed ? client.isValidating : server.isValidating;
+  const mutate = keyed ? client.mutate : server.mutate;
+
   const filtersActive = Boolean(q.trim() || category || channel || direction || showDeleted || lowConfidence || autoCategorized);
   const { data: cats } = useSWR<{ rows: CategoryRow[] }>("/api/categories");
 
@@ -124,10 +173,19 @@ function LedgerInner() {
   }
 
   async function patch(id: string, body: Record<string, unknown>) {
+    const patchBody: Record<string, unknown> = { ...body };
+    if (keyed && "notes" in body) {
+      const encPayload = client.reseal(id, { notes: (body.notes as string | null) ?? null });
+      if (encPayload) {
+        patchBody.encPayload = encPayload;
+        delete patchBody.notes;
+      }
+      // else: a dual-read plaintext straggler row — PATCH notes as plaintext, same as non-keyed.
+    }
     await fetch(`/api/transactions/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(patchBody),
     });
     mutate();
   }

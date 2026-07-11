@@ -23,12 +23,20 @@ export class E2EDecryptError extends Error {
   }
 }
 
+// btoa/atob (not Buffer) so this module runs identically in the browser and
+// in Node — no bundler polyfill required for the client-side decrypt path.
 function toBase64Url(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64url");
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function fromBase64Url(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, "base64url"));
+  const padded = s.replace(/-/g, "+").replace(/_/g, "/").padEnd(s.length + ((4 - (s.length % 4)) % 4), "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 function concatBytes(...arrays: Uint8Array[]): Uint8Array {
