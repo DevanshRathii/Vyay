@@ -12,6 +12,7 @@ import {
   LogOut,
   Moon,
   Settings,
+  ShieldCheck,
   Sun,
   Tags,
   type LucideIcon,
@@ -77,16 +78,23 @@ export function AppShell({
   activePage,
   onNavigate,
   navItems = NAV,
+  showAdmin = false,
 }: {
   children: React.ReactNode;
   userName?: string | null;
   activePage?: string;
   onNavigate?: (href: string) => void;
   navItems?: NavItem[];
+  /** Appends an "Admin" item — computed here, not passed in, since a plain
+   *  array of icon-bearing objects doesn't reliably cross the server→client
+   *  boundary from an async Server Component (only real "use client" props
+   *  like this boolean should). */
+  showAdmin?: boolean;
 }) {
   const pathname = usePathname();
   const isDemo = onNavigate !== undefined;
   const isActive = (href: string) => (isDemo ? activePage === href : pathname === href);
+  const items = showAdmin ? [...navItems, { href: "/admin", label: "Admin", icon: ShieldCheck }] : navItems;
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl">
@@ -100,7 +108,7 @@ export function AppShell({
             <span className="text-[17px] font-semibold tracking-tight">Vyay</span>
           </Link>
           <nav className="flex flex-col gap-0.5">
-            {navItems.map(({ href, label, icon: Icon }) => {
+            {items.map(({ href, label, icon: Icon }) => {
               const active = isActive(href);
               const className = cn(
                 "relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm font-medium",
@@ -156,7 +164,7 @@ export function AppShell({
         className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-line bg-card/90 backdrop-blur-lg sm:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        {navItems.map(({ href, label, icon: Icon }) => {
+        {items.map(({ href, label, icon: Icon }) => {
           const active = isActive(href);
           const className = cn(
             "relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium",
