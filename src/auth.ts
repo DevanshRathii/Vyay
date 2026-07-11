@@ -17,6 +17,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // On initial sign-in, resolve (or create) the database user and pin its id.
       if (account?.provider === "google" && profile?.email) {
         const email = profile.email.toLowerCase();
+        const isAdmin = ADMIN_EMAIL !== null && email === ADMIN_EMAIL;
         let dbUser = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
         if (!dbUser) {
           dbUser = (
@@ -26,16 +27,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 email,
                 name: profile.name ?? email.split("@")[0],
                 image: typeof profile.picture === "string" ? profile.picture : null,
+                gmailAccessGranted: isAdmin,
               })
               .returning()
           )[0];
           await ensureDefaultCategories(dbUser.id);
-          // Sign-in itself is already gated by Google's OAuth Test users list
-          // (the app is unverified/in Testing) — anyone reaching this point
-          // was already added there. This is just an FYI, fired once ever per
-          // account, never on ADMIN_EMAIL's own first sign-in.
-          if (ADMIN_EMAIL === null || email !== ADMIN_EMAIL) {
-            waitUntil(notifyAdmin(`New Vyay user: ${email}`));
+          // Plain Google sign-in only needs a basic (non-sensitive-scope)
+          // consent, which Google never restricts — so this fires for
+          // literally anyone with a Google account, not just people already
+          // on the Test users list. FYI-only, fired once ever per account,
+          // never for ADMIN_EMAIL's own first sign-in.
+          if (!isAdmin) {
+            waitUntil(notifyAdmin(`New Vyay user: ${email} — grant Gmail access from /admin once they're also added as a Google test user.`));
           }
         }
         token.uid = dbUser.id;

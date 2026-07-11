@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { gmailConnections } from "@/lib/db/schema";
+import { gmailConnections, users } from "@/lib/db/schema";
 import { getUserId, unauthorized } from "@/lib/session";
 import { gmailOauthConfigured } from "@/lib/gmail/client";
 
@@ -13,6 +13,7 @@ export async function GET() {
   const conn = (
     await db.select().from(gmailConnections).where(eq(gmailConnections.userId, userId)).limit(1)
   )[0];
+  const dbUser = (await db.select({ granted: users.gmailAccessGranted }).from(users).where(eq(users.id, userId)).limit(1))[0];
   const hasProgress = conn?.syncStatus === "syncing" && conn.syncProgressPhase != null;
   let selectedProviders: string[] | null = null;
   if (conn?.selectedProviders) {
@@ -24,6 +25,7 @@ export async function GET() {
   }
   return NextResponse.json({
     oauthConfigured: gmailOauthConfigured(),
+    gmailAccessGranted: Boolean(dbUser?.granted),
     connected: Boolean(conn),
     emailAddress: conn?.emailAddress ?? null,
     syncStatus: conn?.syncStatus ?? null,

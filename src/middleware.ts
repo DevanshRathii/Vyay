@@ -13,5 +13,5 @@ export default auth((req) => {
 
 // Pages that require a signed-in user. API routes enforce auth themselves.
 export const config = {
-  matcher: ["/", "/ledger/:path*", "/categories/:path*", "/matches/:path*", "/settings/:path*"],
+  matcher: ["/", "/ledger/:path*", "/categories/:path*", "/matches/:path*", "/settings/:path*", "/admin/:path*"],
 };

@@ -33,6 +33,7 @@ const AUTO_CONTINUE_LIMIT = 6;
 
 interface GmailStatus {
   oauthConfigured: boolean;
+  gmailAccessGranted: boolean;
   connected: boolean;
   emailAddress: string | null;
   syncStatus: "idle" | "syncing" | "error" | null;
@@ -200,6 +201,12 @@ function GmailCard() {
             <code className="font-mono text-[12px]">GOOGLE_CLIENT_ID</code> and{" "}
             <code className="font-mono text-[12px]">GOOGLE_CLIENT_SECRET</code> in{" "}
             <code className="font-mono text-[12px]">.env</code> — see the README for the Google Cloud setup steps.
+          </p>
+        ) : !data.connected && !data.gmailAccessGranted ? (
+          <p className="rounded-xl bg-card-2 px-3.5 py-3 text-[13px] text-muted">
+            Vyay is invite-only while it&apos;s being tested — the app owner needs to grant Gmail access to your
+            account before you can connect. You&apos;ll be able to as soon as that&apos;s done, no action needed
+            from you.
           </p>
         ) : !data.connected ? (
           <div className="flex flex-col gap-3">

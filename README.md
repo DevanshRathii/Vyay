@@ -73,7 +73,7 @@ Google OAuth credentials are required — they cover both sign-in and Gmail acce
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com) → create a project (e.g. "Vyay").
 2. **APIs & Services → Library** → enable the **Gmail API**.
-3. **APIs & Services → OAuth consent screen** → External → fill the app name and your email. Add every account that should be able to sign in as a **test user** (up to 100 while the app is unverified — see Troubleshooting for what that means for token lifetime).
+3. **APIs & Services → OAuth consent screen** → External → fill the app name and your email. Add every account that should be able to **connect Gmail** as a **test user** (up to 100 while the app is unverified — see Troubleshooting for what that means for token lifetime). This does **not** restrict who can sign in to Vyay itself — see "Access control" below.
 4. Add the scope `https://www.googleapis.com/auth/gmail.readonly`. The default openid/email/profile scopes (used for sign-in) are included automatically.
 5. **Credentials → Create credentials → OAuth client ID → Web application**, and add **both** redirect URIs:
    - `{APP_URL}/api/auth/callback/google` — Google login
@@ -84,6 +84,17 @@ Google OAuth credentials are required — they cover both sign-in and Gmail acce
 Then in Vyay: **Settings → Connect Gmail** → approve read-only access. The first sync scans the last `SYNC_LOOKBACK_MONTHS` (default 6) of alert emails; after that, incremental syncs run every `SYNC_INTERVAL_MINUTES` in the background and on demand via **Sync now**.
 
 Vyay requests `gmail.readonly` only — it can never send, modify, or delete mail. Tokens are AES-256-GCM encrypted with your `ENCRYPTION_KEY`.
+
+## Access control
+
+There are two, independent gates, easy to conflate:
+
+1. **Signing in with Google** — always open to any Google account. Google never restricts non-sensitive scopes (basic profile/email), regardless of this app's verification status. Anyone who signs in gets a Vyay account, but it's inert without Gmail — no bank data, an empty ledger, default categories only.
+2. **Connecting Gmail** (the sensitive `gmail.readonly` scope) — restricted twice over:
+   - **Google's own gate**: while unverified, only accounts on the OAuth consent screen's **Test users** list (Google Cloud Console → Google Auth Platform → Audience) can complete this flow at all. There's no API for managing this list — it's a manual, per-account step in Cloud Console, every time.
+   - **Vyay's own gate**: a signed-in user can't even reach that Google consent screen until an admin grants them `gmailAccessGranted` from **`/admin`** (visible only to `ADMIN_EMAIL`). This exists so a new sign-up doesn't hit a confusing raw Google error — Settings tells them plainly to wait for the app owner instead.
+
+So approving someone end-to-end is two manual steps, both on you: add them as a Google test user (Cloud Console) **and** grant them Gmail access (`/admin`) — either alone isn't enough. `/admin` links directly to the Cloud Console Audience page as a reminder. Set `ADMIN_NOTIFY_WEBHOOK_URL` to get pinged (Slack/Discord/ntfy-shaped JSON POST) the moment someone new signs up, instead of finding out secondhand.
 
 ## Apple Shortcut
 
@@ -121,8 +132,9 @@ Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (
 | `SYNC_INTERVAL_MINUTES` | no | `15` | Self-host background sync cadence (`0` disables — required on Vercel, which uses Cron instead) |
 | `SYNC_MAX_INITIAL_MESSAGES` | no | `3000` | Initial sync safety cap |
 | `EXTRA_GMAIL_QUERY` | no | — | Extra Gmail search terms, e.g. `from:(mybank.com)` |
-| `ADMIN_EMAIL` | no | — | Skips the "new user" notification for your own first sign-in. Doesn't gate access — while the app is unverified, Google's OAuth consent screen already restricts sign-in to the Test users you add in Cloud Console |
+| `ADMIN_EMAIL` | no | — | Who `/admin` is restricted to; skips the "new user" notification for your own first sign-in. Plain sign-in is always open to any Google account — see "Access control" below for what this actually gates |
 | `ADMIN_NOTIFY_WEBHOOK_URL` | no | — | POSTed a Slack/Discord-shaped JSON body (`{ text, content }`) when a new user signs in for the first time, or submits the in-app "urgent feedback" button — point it at an incoming webhook, ntfy.sh topic, etc. |
+| `NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT` | no | — | Your Google Cloud project id/number — makes `/admin`'s "Add to Google Test users" link go straight to your project instead of the generic console entry point |
 
 ## Commands
 

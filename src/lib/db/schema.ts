@@ -28,6 +28,13 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name"),
   image: text("image"),
+  /** Signing in with Google never requires this — that only needs a basic
+   *  (non-sensitive-scope) Google consent, which Google never restricts.
+   *  This gates the *separate* Gmail-connect flow (sensitive gmail.readonly
+   *  scope), set by the admin from /admin once they've also added the user
+   *  to the Google Cloud Console OAuth "Test users" list — that second,
+   *  manual step has no public API and can't be automated from here. */
+  gmailAccessGranted: boolean("gmail_access_granted").notNull().default(false),
   createdAt: now(),
 });
 
