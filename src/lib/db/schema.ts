@@ -28,6 +28,13 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name"),
   image: text("image"),
+  /** Signing in with Google never requires this — that only needs a basic
+   *  (non-sensitive-scope) Google consent, which Google never restricts.
+   *  This gates the *separate* Gmail-connect flow (sensitive gmail.readonly
+   *  scope), set by the admin from /admin once they've also added the user
+   *  to the Google Cloud Console OAuth "Test users" list — that second,
+   *  manual step has no public API and can't be automated from here. */
+  gmailAccessGranted: boolean("gmail_access_granted").notNull().default(false),
   createdAt: now(),
 });
 
@@ -203,6 +210,27 @@ export const shortcutEvents = pgTable(
   (t) => [index("shortcut_user_idx").on(t.userId, t.status)],
 );
 
+export const feedbackMessages = pgTable(
+  "feedback_messages",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    message: text("message").notNull(),
+    resolved: boolean("resolved").notNull().default(false),
+    createdAt: now(),
+  },
+  (t) => [index("feedback_user_idx").on(t.userId)],
+);
+
+export const preapprovedEmails = pgTable("preapproved_emails", {
+  id: id(),
+  /** lowercased */
+  email: text("email").notNull().unique(),
+  createdAt: now(),
+});
+
 export type User = typeof users.$inferSelect;
 export type GmailConnection = typeof gmailConnections.$inferSelect;
 export type Category = typeof categories.$inferSelect;
@@ -211,3 +239,5 @@ export type MerchantRule = typeof merchantRules.$inferSelect;
 export type ApiToken = typeof apiTokens.$inferSelect;
 export type ShortcutEvent = typeof shortcutEvents.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
+export type FeedbackMessage = typeof feedbackMessages.$inferSelect;
+export type PreapprovedEmail = typeof preapprovedEmails.$inferSelect;

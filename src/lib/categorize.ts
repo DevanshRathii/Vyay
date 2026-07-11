@@ -95,8 +95,13 @@ export const BRAND_RULES: Array<{ pattern: string; category: string; exclude?: s
   { pattern: "hotstar", category: "Subscriptions" },
   { pattern: "prime video", category: "Subscriptions" },
   { pattern: "youtube premium", category: "Subscriptions" },
+  { pattern: "youtube", category: "Subscriptions" },
   { pattern: "apple.com/bill", category: "Subscriptions" },
   { pattern: "apple services", category: "Subscriptions" },
+  // Apple's real billing descriptor is "APPLE MEDIA SERVICES", which
+  // doesn't contain "apple services" as a substring — confirmed production
+  // gap (16 uncategorized rows in one inbox).
+  { pattern: "apple media services", category: "Subscriptions" },
   { pattern: "google one", category: "Subscriptions" },
   // Utilities / Bills
   { pattern: "jio", category: "Utilities" },
@@ -172,6 +177,7 @@ export const GENERIC_RULES: Array<{ pattern: string; category: string }> = [
   { pattern: "idli", category: "Food" },
   { pattern: "momos", category: "Food" },
   { pattern: "shawarma", category: "Food" },
+  { pattern: "food", category: "Food" },
   // Groceries
   { pattern: "kirana", category: "Groceries" },
   { pattern: "mart", category: "Groceries" },
@@ -192,6 +198,7 @@ export const GENERIC_RULES: Array<{ pattern: string; category: string }> = [
   // Healthcare
   { pattern: "hospital", category: "Healthcare" },
   { pattern: "healthcare", category: "Healthcare" },
+  { pattern: "health", category: "Healthcare" },
   { pattern: "clinic", category: "Healthcare" },
   { pattern: "diagnostic", category: "Healthcare" },
   { pattern: "lab", category: "Healthcare" },

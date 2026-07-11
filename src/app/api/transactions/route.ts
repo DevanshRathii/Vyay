@@ -47,6 +47,7 @@ export async function GET(req: Request) {
       categoryColor: categories.color,
       notes: transactions.notes,
       confidence: transactions.confidence,
+      merchantSource: transactions.merchantSource,
       merchantConfidence: transactions.merchantConfidence,
       duplicateOfId: transactions.duplicateOfId,
       deletedAt: transactions.deletedAt,

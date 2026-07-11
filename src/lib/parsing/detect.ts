@@ -19,6 +19,19 @@ const HARD_NEGATIVE: Array<[RegExp, string]> = [
   [/(?:failed|declined|unsuccessful)\s+(?:transaction|payment|txn)/i, "failed"],
   [/e-?mandate\s+(?:has been\s+)?(?:created|registered|set|approved)|autopay\s+(?:is\s+)?(?:set|enabled|registered)/i, "mandate-setup"],
   [/newsletter|webinar|invit(?:e|ation)\s+(?:to|for)/i, "newsletter"],
+  // "converting your transaction of Rs X...into Flexipay EMIs" — an EMI-
+  // conversion marketing offer, not a transaction. The generic "transaction
+  // of" STRONG_POSITIVE phrase below would otherwise let these through with
+  // no merchant (real confirmed production gap: 31 of 538 flagged rows in
+  // one inbox were this exact SBI Card offer template). Scoped to the
+  // "convert...into EMI/Flexipay" phrasing specifically so a genuine EMI
+  // *installment debit* confirmation ("Your EMI of Rs 5000 has been
+  // debited") — which never uses "convert" — still passes through.
+  // `.` doesn't match newline by default and real bank HTML-to-text emails
+  // wrap mid-sentence, so [\s\S] (not .) for the gap — confirmed necessary
+  // against the real fixture, whose actual line break lands exactly between
+  // "done on" and the date, right in the middle of this phrase.
+  [/convert(?:ing)?\s+your\s+transaction\b[\s\S]{0,80}?\b(?:emis?|flexipay)\b/i, "emi-conversion-offer"],
 ];
 
 /**

@@ -7,6 +7,15 @@ export async function getUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+/** True if the signed-in user is the app owner (ADMIN_EMAIL). No DB round
+ *  trip — admin-ness is purely "does your session email match the env var." */
+export async function getIsAdmin(): Promise<boolean> {
+  const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
+  if (!adminEmail) return false;
+  const session = await auth();
+  return session?.user?.email?.toLowerCase() === adminEmail;
+}
+
 export function unauthorized() {
   return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 }

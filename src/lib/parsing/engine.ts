@@ -237,11 +237,23 @@ function fromNarration(text: string): { merchant?: string; upiId?: string; ref?:
 
 const MERCHANT_PATTERNS: Array<{ re: RegExp; group: number; source: "info-freetext" | "pattern" }> = [
   { re: /(?:Info|Remarks?|Narration|Description)\s*[:\-]\s*(?:UPI[/-][A-Z]{2}[/-]\d+[/-])?([^\n\r]{2,60})/i, group: 1, source: "info-freetext" },
-  { re: /\bat\s+([A-Z0-9][\w &.'*@-]{1,50}?)(?=\s+on\s|\s+using\s|\s+via\s|\s+vide\s|[.,;\n]|$)/, group: 1, source: "pattern" },
-  { re: /(?:paid|sent|payment)\s+(?:of\s+(?:₹|rs\.?|inr)\s?[\d,.]+\s+)?to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|for|is|was|has)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
-  { re: /(?:transferred?|remitted)\s+to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
-  { re: /(?:received|credited)\s+from\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|to)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
-  { re: /\btowards\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via)\b|[.,;\n(]|$)/i, group: 1, source: "pattern" },
+  { re: /\bat\s+([A-Z0-9][\w &.'*@-]{1,50}?)(?=\s+on\s|\s+using\s|\s+via\s|\s+vide\s|[.,;\n/]|$)/, group: 1, source: "pattern" },
+  { re: /(?:paid|sent|payment)\s+(?:of\s+(?:₹|rs\.?|inr)\s?[\d,.]+\s+)?to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|for|is|was|has)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
+  { re: /(?:transferred?|remitted)\s+to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
+  { re: /(?:received|credited)\s+from\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|to)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
+  // NACH/mandate narrations read "towards PAYEE NAME/refcode" — without the
+  // "/" stop, the lazy capture runs past the 50-char cap looking for "on"/
+  // punctuation and the whole match fails, silently dropping the merchant
+  // (confirmed production gap: "towards INDIAN CLEARING CORP/49391221 with
+  // UMRN..." was extracting nothing at all).
+  { re: /\btowards\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
+  // Auto-pay/e-mandate confirmations ("Your NETFLIX bill, set up through
+  // E-mandate (Auto payment), has been successfully paid...") name the
+  // merchant right after "your", before none of the other patterns above
+  // ever fire — confirmed production gap for Netflix and similar recurring
+  // subscriptions billed this way. Kept last: broader phrasing than the
+  // others, so more specific patterns get first try.
+  { re: /\byour\s+([^\n\r]{1,40}?)\s+bill\b/i, group: 1, source: "pattern" },
 ];
 
 /**

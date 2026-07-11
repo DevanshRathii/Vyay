@@ -33,6 +33,7 @@ const AUTO_CONTINUE_LIMIT = 6;
 
 interface GmailStatus {
   oauthConfigured: boolean;
+  gmailAccessGranted: boolean;
   connected: boolean;
   emailAddress: string | null;
   syncStatus: "idle" | "syncing" | "error" | null;
@@ -41,6 +42,8 @@ interface GmailStatus {
   initialSyncDone: boolean;
   totalSynced: number;
   syncProgress: { phase: "listing" | "ingesting"; processed: number; total: number } | null;
+  /** null = every provider in the registry is being watched */
+  selectedProviders: string[] | null;
 }
 
 interface TokenRow {
@@ -199,6 +202,12 @@ function GmailCard() {
             <code className="font-mono text-[12px]">GOOGLE_CLIENT_SECRET</code> in{" "}
             <code className="font-mono text-[12px]">.env</code> — see the README for the Google Cloud setup steps.
           </p>
+        ) : !data.connected && !data.gmailAccessGranted ? (
+          <p className="rounded-xl bg-card-2 px-3.5 py-3 text-[13px] text-muted">
+            Vyay is invite-only while it&apos;s being tested — the app owner needs to grant Gmail access to your
+            account before you can connect. You&apos;ll be able to as soon as that&apos;s done, no action needed
+            from you.
+          </p>
         ) : !data.connected ? (
           <div className="flex flex-col gap-3">
             {oauthError && (
@@ -263,6 +272,18 @@ function GmailCard() {
                     />
                   </span>
                 )}
+                <p className="mt-1 text-[11px] text-muted">
+                  {data.selectedProviders === null ? (
+                    <>Watching all {PROVIDERS.length} banks &amp; payment apps in the registry.</>
+                  ) : (
+                    <>
+                      Watching {data.selectedProviders.length} of {PROVIDERS.length} banks &amp; apps:{" "}
+                      {data.selectedProviders.map((id) => PROVIDERS.find((p) => p.id === id)?.name ?? id).join(", ")}.
+                      Any other bank, credit card, or payment app won&apos;t be picked up — that&apos;s why sync may
+                      have felt faster. Disconnect and reconnect to change this selection.
+                    </>
+                  )}
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button size="sm" variant="secondary" disabled={syncing} onClick={() => syncNow(false)}>
@@ -301,7 +322,12 @@ function GmailCard() {
                 The first sync hasn&apos;t completed yet — hit “Sync now” to start importing.
               </p>
             )}
-            {reparseResult && (
+            {reparsing && (
+              <p className="flex items-center gap-1.5 rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px] text-muted">
+                <Spinner className="h-3 w-3" /> Re-parsing your transactions…
+              </p>
+            )}
+            {!reparsing && reparseResult && (
               <p className="rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px] text-muted">
                 Re-parsed {reparseResult.scanned} transaction{reparseResult.scanned === 1 ? "" : "s"} — updated{" "}
                 {reparseResult.updated}. Category and notes you&apos;ve already set are never overwritten.

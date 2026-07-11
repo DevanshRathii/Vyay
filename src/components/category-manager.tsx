@@ -1,6 +1,7 @@
 "use client";
 
-import { Plus, Tags, Trash2, Wand2 } from "lucide-react";
+import { Pencil, Plus, Tags, Trash2, Wand2 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, CardHeader, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
@@ -119,17 +120,31 @@ export function CategoryManager() {
         />
         <div className="grid gap-2 p-5 pt-3 sm:grid-cols-2 lg:grid-cols-3">
           {cats.rows.map((c) => (
-            <button
+            <Link
               key={c.id}
-              className="flex items-center justify-between rounded-xl border border-line bg-card-2/60 px-3.5 py-3 text-left hover:border-accent/40"
-              onClick={() => setEditing(c)}
+              href={`/ledger?category=${c.id}`}
+              className="flex items-center justify-between rounded-xl border border-line bg-card-2/60 px-3.5 py-3 hover:border-accent/40"
+              title={`View ${c.name} transactions in the Ledger`}
             >
-              <span className="flex items-center gap-2.5 text-sm font-medium">
-                <span className="h-3 w-3 rounded-full" style={{ background: c.color }} />
-                {c.name}
+              <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.color }} />
+                <span className="truncate">{c.name}</span>
               </span>
-              <span className="text-[12px] tabular-nums text-muted">{c.txnCount}</span>
-            </button>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-[12px] tabular-nums text-muted">{c.txnCount}</span>
+                <button
+                  type="button"
+                  className="rounded-lg p-1 text-muted hover:bg-line/60 hover:text-fg"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setEditing(c);
+                  }}
+                  aria-label={`Edit ${c.name}`}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            </Link>
           ))}
           {cats.rows.length === 0 && (
             <div className="sm:col-span-2 lg:col-span-3">

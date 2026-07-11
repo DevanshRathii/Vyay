@@ -51,6 +51,13 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     page: "/settings",
+    selector: '[data-tour="urgent-feedback"]',
+    title: "Stuck on something?",
+    description:
+      "Any signed-in user can flag a blocking bug from here — it goes straight to Devansh, no support ticket needed.",
+  },
+  {
+    page: "/settings",
     selector: null,
     title: "Ready to see your own money?",
     description: "This was sample data. Sign in with Google to connect your real Gmail and build your own ledger.",

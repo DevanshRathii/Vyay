@@ -235,3 +235,36 @@ describe("stripDisplaySuffixes", () => {
     expect(stripDisplaySuffixes("India Gate Restaurant")).toBe("India Gate Restaurant");
   });
 });
+
+describe("real production fixtures (found via DB investigation of low-confidence/uncategorized rows)", () => {
+  it("HDFC e-mandate autopay confirmation — 'Your NETFLIX bill...has been successfully paid' names the merchant after 'your'", () => {
+    const p = parseEmail(
+      email(
+        "nachautoemailer <nachautoemailer@hdfcbank.bank.in>",
+        "View: Account update for your HDFC Bank A/c",
+        "Dear Customer,\nGreetings from HDFC Bank!\nYour NETFLIX bill, set up through E-mandate (Auto payment), has been successfully paid using your HDFC Bank Credit Card ending 5323.\nTransaction Details:\nAmount: INR 649.00\nDate: 11/06/2026\nSI Hub ID: XpPjbm4fLT",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.amountPaise).toBe(64900);
+    expect(p!.direction).toBe("debit");
+    expect(p!.merchant).toBe("NETFLIX");
+    expect(p!.merchantSource).toBe("pattern");
+  });
+
+  it("HDFC NACH mandate debit — 'towards PAYEE/refcode' truncates at the '/' instead of losing the merchant entirely", () => {
+    const p = parseEmail(
+      email(
+        "nachautoemailer <nachautoemailer@hdfcbank.bank.in>",
+        "Account update for your HDFC Bank A/c",
+        "Dear Customer,\nRs.5000.00 has been debited from HDFC Bank Account Number XXXXXXXXXX0954 towards INDIAN CLEARING CORP/49391221 with UMRN HDFC7021803252008682 on 09-Jul-2026.\nAssuring you of our best services at all times.",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.amountPaise).toBe(500000);
+    // Before the fix, the lazy capture ran past its 50-char cap looking for
+    // " on"/punctuation across "INDIAN CLEARING CORP/49391221 with UMRN
+    // HDFC7021803252008682" and the whole match failed, leaving no merchant.
+    expect(p!.merchant).toBe("INDIAN CLEARING CORP");
+  });
+});

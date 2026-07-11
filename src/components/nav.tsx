@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import useSWR from "swr";
+import { UrgentFeedbackButton } from "@/components/feedback-button";
 import { cn } from "@/lib/utils";
 
 export interface NavItem {
@@ -179,6 +180,8 @@ export function AppShell({
           );
         })}
       </nav>
+
+      <UrgentFeedbackButton />
     </div>
   );
 }

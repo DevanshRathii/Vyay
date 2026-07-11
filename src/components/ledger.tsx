@@ -13,7 +13,8 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
 import { cn, formatINR } from "@/lib/utils";
@@ -35,6 +36,7 @@ interface Txn {
   categorySource: string | null;
   notes: string | null;
   confidence: number | null;
+  merchantSource: string | null;
   merchantConfidence: number | null;
   duplicateOfId: string | null;
   deletedAt: number | null;
@@ -45,6 +47,21 @@ const LOW_MERCHANT_CONFIDENCE = 0.6;
 function isLowConfidenceMerchant(t: Pick<Txn, "merchantConfidence">): boolean {
   return t.merchantConfidence != null && t.merchantConfidence < LOW_MERCHANT_CONFIDENCE;
 }
+
+const MERCHANT_SOURCE_LABELS: Record<string, string> = {
+  contact: "your saved contact",
+  narration: "bank narration",
+  "vpa-name": "UPI beneficiary name",
+  pattern: "email text match",
+  "info-freetext": "free-text guess",
+  "upi-id": "UPI ID — no name found",
+};
+
+const CATEGORY_SOURCE_LABELS: Record<string, string> = {
+  user: "your rule",
+  brand: "known brand match",
+  generic: "generic keyword guess",
+};
 
 interface CategoryRow {
   id: string;
@@ -61,10 +78,14 @@ function fmtTime(ms: number) {
   return new Date(ms).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
 }
 
-export function Ledger() {
-  const [q, setQ] = useState("");
-  const [category, setCategory] = useState("");
-  const [channel, setChannel] = useState("");
+function LedgerInner() {
+  const initialParams = useSearchParams();
+  const initialCategory = initialParams.get("category") ?? "";
+  const initialChannel = initialParams.get("channel") ?? "";
+  const initialQ = initialParams.get("q") ?? "";
+  const [q, setQ] = useState(initialQ);
+  const [category, setCategory] = useState(initialCategory);
+  const [channel, setChannel] = useState(initialChannel);
   const [direction, setDirection] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
   const [lowConfidence, setLowConfidence] = useState(false);
@@ -89,10 +110,11 @@ export function Ledger() {
     return p.toString();
   }, [q, category, channel, direction, showDeleted, lowConfidence, autoCategorized, sort, page]);
 
-  const { data, isLoading, mutate } = useSWR<{ rows: Txn[]; total: number; pageSize: number }>(
+  const { data, isLoading, isValidating, mutate } = useSWR<{ rows: Txn[]; total: number; pageSize: number }>(
     `/api/transactions?${query}`,
     { keepPreviousData: true },
   );
+  const filtersActive = Boolean(q.trim() || category || channel || direction || showDeleted || lowConfidence || autoCategorized);
   const { data: cats } = useSWR<{ rows: CategoryRow[] }>("/api/categories");
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
@@ -115,6 +137,31 @@ export function Ledger() {
     setPage(1);
   }
 
+  function clearAllFilters() {
+    resetFilters(() => {
+      setQ("");
+      setCategory("");
+      setChannel("");
+      setDirection("");
+      setShowDeleted(false);
+      setLowConfidence(false);
+      setAutoCategorized(false);
+    });
+  }
+
+  const emptyState = (
+    <Empty
+      title={showDeleted ? "No deleted transactions" : filtersActive ? "No transactions match your filters" : "No transactions found"}
+      hint={filtersActive ? undefined : "Sync Gmail from Settings to import transactions."}
+    >
+      {filtersActive && (
+        <Button variant="secondary" size="sm" onClick={clearAllFilters} className="mt-1">
+          Clear filters
+        </Button>
+      )}
+    </Empty>
+  );
+
   const Th = ({ label, sortKey, className }: { label: string; sortKey?: string; className?: string }) => (
     <th className={cn("px-3 py-2.5 text-left text-[12px] font-semibold text-muted", className)}>
       {sortKey ? (
@@ -133,8 +180,18 @@ export function Ledger() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <div data-tour="ledger-search" className="relative min-w-0 flex-1 sm:max-w-xs">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <Input placeholder="Search merchant, notes, ref…" value={q} onChange={(e) => resetFilters(() => setQ(e.target.value))} className="pl-9" />
+          {isValidating ? (
+            <Spinner className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+          ) : (
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          )}
+          <Input
+            placeholder="Search merchant, notes, ref…"
+            value={q}
+            onChange={(e) => resetFilters(() => setQ(e.target.value))}
+            className="pl-9"
+            aria-label="Search transactions"
+          />
         </div>
         <Select value={category} onChange={(e) => resetFilters(() => setCategory(e.target.value))} aria-label="Category filter">
           <option value="">All categories</option>
@@ -193,7 +250,14 @@ export function Ledger() {
           </thead>
           <tbody>
             {data?.rows.map((t) => (
-              <tr key={t.id} className={cn("border-b border-line/70 last:border-0 hover:bg-card-2/60", t.deletedAt && "opacity-50")}>
+              <tr
+                key={t.id}
+                onClick={() => setEditing(t)}
+                className={cn(
+                  "cursor-pointer border-b border-line/70 last:border-0 hover:bg-card-2/60",
+                  t.deletedAt && "opacity-50",
+                )}
+              >
                 <td className="whitespace-nowrap px-3 py-2.5 text-[13px]">
                   <div>{fmtDate(t.occurredAt)}</div>
                   <div className="text-[11px] text-muted">{fmtTime(t.occurredAt)}</div>
@@ -225,7 +289,7 @@ export function Ledger() {
                   </span>
                 </td>
                 <td className="px-3 py-2.5 text-[13px] text-muted">{t.channel ?? "—"}</td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     <Select
                       value={t.categoryId ?? ""}
@@ -248,7 +312,7 @@ export function Ledger() {
                   </div>
                 </td>
                 <td className="max-w-[180px] truncate px-3 py-2.5 text-[13px] text-muted">{t.notes ?? ""}</td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditing(t)} aria-label="Edit">
                       <Pencil className="h-3.5 w-3.5" />
@@ -273,9 +337,7 @@ export function Ledger() {
             <Spinner />
           </div>
         )}
-        {data && data.rows.length === 0 && (
-          <Empty title={showDeleted ? "No deleted transactions" : "No transactions found"} hint="Try clearing filters, or sync Gmail from Settings." />
-        )}
+        {data && data.rows.length === 0 && emptyState}
       </Card>
 
       {/* Mobile cards */}
@@ -335,11 +397,7 @@ export function Ledger() {
             </div>
           </Card>
         ))}
-        {data && data.rows.length === 0 && (
-          <Card>
-            <Empty title={showDeleted ? "No deleted transactions" : "No transactions found"} hint="Try clearing filters, or sync Gmail from Settings." />
-          </Card>
-        )}
+        {data && data.rows.length === 0 && <Card>{emptyState}</Card>}
       </div>
 
       {/* Pagination */}
@@ -372,6 +430,14 @@ export function Ledger() {
         setEditing(null);
       }} />
     </div>
+  );
+}
+
+export function Ledger() {
+  return (
+    <Suspense>
+      <LedgerInner />
+    </Suspense>
   );
 }
 
@@ -409,12 +475,22 @@ function EditDialog({
             </p>
             {txn.referenceNumber && <p className="mt-0.5 text-[12px] text-muted">Ref {txn.referenceNumber}</p>}
             {txn.emailSubject && <p className="mt-1 line-clamp-2 text-[12px] text-muted">“{txn.emailSubject}”</p>}
-            {txn.confidence != null && <p className="mt-1 text-[11px] text-muted">Parse confidence {(txn.confidence * 100).toFixed(0)}%</p>}
-            {isLowConfidenceMerchant(txn) && (
-              <p className="mt-0.5 text-[11px] text-amber-500">
-                Merchant confidence {Math.round((txn.merchantConfidence ?? 0) * 100)}% — a guess, worth verifying
+            <div className="mt-2 flex flex-col gap-0.5 border-t border-line pt-2">
+              <p className={cn("text-[11px]", isLowConfidenceMerchant(txn) ? "text-amber-500" : "text-muted")}>
+                Merchant: {txn.merchantSource ? MERCHANT_SOURCE_LABELS[txn.merchantSource] ?? txn.merchantSource : "unknown"}
+                {txn.merchantConfidence != null && ` (${Math.round(txn.merchantConfidence * 100)}%)`}
+                {isLowConfidenceMerchant(txn) && " — worth verifying"}
               </p>
-            )}
+              <p className={cn("text-[11px]", txn.categorySource === "generic" ? "text-amber-500" : "text-muted")}>
+                Category:{" "}
+                {txn.categoryId
+                  ? txn.categorySource
+                    ? (CATEGORY_SOURCE_LABELS[txn.categorySource] ?? txn.categorySource)
+                    : "manually set"
+                  : "not set"}
+                {txn.categorySource === "generic" && " — worth verifying"}
+              </p>
+            </div>
           </div>
           <div>
             <Label className="flex items-center gap-1.5">
