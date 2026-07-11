@@ -1,9 +1,9 @@
 "use client";
 
-import { Check, Copy, ExternalLink, MailCheck, ShieldOff } from "lucide-react";
+import { Check, Copy, ExternalLink, MailCheck, Plus, ShieldOff, X } from "lucide-react";
 import { useState } from "react";
 import useSWR from "swr";
-import { Badge, Button, Card, CardHeader } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Input } from "@/components/ui";
 
 interface AdminUserRow {
   id: string;
@@ -12,6 +12,12 @@ interface AdminUserRow {
   createdAt: number;
   gmailAccessGranted: boolean;
   hasGmailConnection: boolean;
+}
+
+interface PreapprovedRow {
+  id: string;
+  email: string;
+  createdAt: number;
 }
 
 const GOOGLE_TEST_USERS_URL = process.env.NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT
@@ -43,6 +49,87 @@ function CopyEmailButton({ email }: { email: string }) {
       {copied ? <Check className="h-3.5 w-3.5 text-positive" /> : <Copy className="h-3.5 w-3.5" />}
       {copied ? "Copied" : "Copy email"}
     </Button>
+  );
+}
+
+export function PreapprovedPanel() {
+  const { data, mutate } = useSWR<{ rows: PreapprovedRow[] }>("/api/admin/preapproved");
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  async function add() {
+    if (!email.trim()) return;
+    setSubmitting(true);
+    await fetch("/api/admin/preapproved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim() }),
+    });
+    setEmail("");
+    setSubmitting(false);
+    mutate();
+  }
+
+  async function remove(id: string) {
+    setRemoving(id);
+    await fetch(`/api/admin/preapproved/${id}`, { method: "DELETE" });
+    setRemoving(null);
+    mutate();
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Pre-approve someone"
+        subtitle="Before they've ever signed in — pairs with also adding them as a Google test user"
+      />
+      <div className="flex flex-col gap-3 px-5 pb-5 pt-2">
+        <p className="text-[12px] leading-relaxed text-muted">
+          Add their email here, then add the same email to your{" "}
+          <a
+            href={GOOGLE_TEST_USERS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-0.5 font-medium text-accent underline underline-offset-2"
+          >
+            Google Test users list <ExternalLink className="h-3 w-3" />
+          </a>
+          . When they sign in for the first time, Gmail access is granted automatically — nothing left to do.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            type="email"
+            placeholder="someone@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+          />
+          <Button onClick={add} disabled={submitting || !email.trim()} className="shrink-0">
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+        {data && data.rows.length > 0 && (
+          <div className="flex flex-col">
+            {data.rows.map((r) => (
+              <div key={r.id} className="flex items-center justify-between border-b border-line py-2 text-[13px] last:border-0">
+                <span className="min-w-0 truncate">{r.email}</span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 shrink-0"
+                  disabled={removing === r.id}
+                  onClick={() => remove(r.id)}
+                  aria-label={`Remove ${r.email}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

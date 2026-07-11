@@ -224,6 +224,13 @@ export const feedbackMessages = pgTable(
   (t) => [index("feedback_user_idx").on(t.userId)],
 );
 
+export const preapprovedEmails = pgTable("preapproved_emails", {
+  id: id(),
+  /** lowercased */
+  email: text("email").notNull().unique(),
+  createdAt: now(),
+});
+
 export type User = typeof users.$inferSelect;
 export type GmailConnection = typeof gmailConnections.$inferSelect;
 export type Category = typeof categories.$inferSelect;
@@ -233,3 +240,4 @@ export type ApiToken = typeof apiTokens.$inferSelect;
 export type ShortcutEvent = typeof shortcutEvents.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
 export type FeedbackMessage = typeof feedbackMessages.$inferSelect;
+export type PreapprovedEmail = typeof preapprovedEmails.$inferSelect;

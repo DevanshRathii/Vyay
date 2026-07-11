@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   await db.insert(feedbackMessages).values({ userId, message: parsed.data.message });
 
   const user = (await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1))[0];
-  waitUntil(notifyAdmin(`Urgent Vyay feedback from ${user?.email ?? userId}:\n${parsed.data.message}`));
+  waitUntil(notifyAdmin(`Urgent feedback from ${user?.email ?? userId}`, parsed.data.message));
 
   return NextResponse.json({ ok: true });
 }

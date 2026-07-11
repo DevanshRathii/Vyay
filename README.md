@@ -94,7 +94,14 @@ There are two, independent gates, easy to conflate:
    - **Google's own gate**: while unverified, only accounts on the OAuth consent screen's **Test users** list (Google Cloud Console → Google Auth Platform → Audience) can complete this flow at all. There's no API for managing this list — it's a manual, per-account step in Cloud Console, every time.
    - **Vyay's own gate**: a signed-in user can't even reach that Google consent screen until an admin grants them `gmailAccessGranted` from **`/admin`** (visible only to `ADMIN_EMAIL`). This exists so a new sign-up doesn't hit a confusing raw Google error — Settings tells them plainly to wait for the app owner instead.
 
-So approving someone end-to-end is two manual steps, both on you: add them as a Google test user (Cloud Console) **and** grant them Gmail access (`/admin`) — either alone isn't enough. `/admin` links directly to the Cloud Console Audience page as a reminder. Set `ADMIN_NOTIFY_WEBHOOK_URL` to get pinged (Slack/Discord/ntfy-shaped JSON POST) the moment someone new signs up, instead of finding out secondhand.
+So approving someone end-to-end is two manual steps, both on you: add them as a Google test user (Cloud Console) **and** grant them Gmail access (`/admin`) — either alone isn't enough. `/admin` links directly to the Cloud Console Audience page as a reminder.
+
+Two ways to do both steps in one sitting, before they even sign up:
+
+- **Pre-approve** their email on `/admin` (paired with adding them as a Google test user) — the moment they sign in for the first time, `gmailAccessGranted` is set automatically and the pre-approval is consumed. Nothing left to grant afterwards; it "just works" for them.
+- Otherwise, `/admin` lists them after they sign up and you grant access there manually.
+
+Set `ADMIN_EMAIL` + `ADMIN_GMAIL_APP_PASSWORD` to get emailed (via Gmail SMTP, from and to that same address) the moment someone new signs up, instead of finding out secondhand — or `ADMIN_NOTIFY_WEBHOOK_URL` for a Slack/Discord/ntfy-shaped webhook instead (or in addition).
 
 ## Apple Shortcut
 
@@ -132,8 +139,9 @@ Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (
 | `SYNC_INTERVAL_MINUTES` | no | `15` | Self-host background sync cadence (`0` disables — required on Vercel, which uses Cron instead) |
 | `SYNC_MAX_INITIAL_MESSAGES` | no | `3000` | Initial sync safety cap |
 | `EXTRA_GMAIL_QUERY` | no | — | Extra Gmail search terms, e.g. `from:(mybank.com)` |
-| `ADMIN_EMAIL` | no | — | Who `/admin` is restricted to; skips the "new user" notification for your own first sign-in. Plain sign-in is always open to any Google account — see "Access control" below for what this actually gates |
-| `ADMIN_NOTIFY_WEBHOOK_URL` | no | — | POSTed a Slack/Discord-shaped JSON body (`{ text, content }`) when a new user signs in for the first time, or submits the in-app "urgent feedback" button — point it at an incoming webhook, ntfy.sh topic, etc. |
+| `ADMIN_EMAIL` | no | — | Who `/admin` is restricted to; skips the "new user" notification for your own first sign-in. Plain sign-in is always open to any Google account — see "Access control" above for what this actually gates |
+| `ADMIN_GMAIL_APP_PASSWORD` | no | — | A Gmail App Password for `ADMIN_EMAIL` (generate at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords), needs 2-Step Verification on) — sends a real email on a new sign-up or "urgent feedback" submission, via Gmail SMTP, from and to `ADMIN_EMAIL` |
+| `ADMIN_NOTIFY_WEBHOOK_URL` | no | — | POSTed a Slack/Discord-shaped JSON body (`{ text, content }`) on the same two events — point it at an incoming webhook, ntfy.sh topic, etc. Independent of the email above; set either, both, or neither |
 | `NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT` | no | — | Your Google Cloud project id/number — makes `/admin`'s "Add to Google Test users" link go straight to your project instead of the generic console entry point |
 
 ## Commands

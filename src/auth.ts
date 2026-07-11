@@ -2,7 +2,7 @@ import NextAuth from "next-auth";
 import { eq } from "drizzle-orm";
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import { preapprovedEmails, users } from "@/lib/db/schema";
 import { ensureDefaultCategories } from "@/lib/categorize";
 import { notifyAdmin } from "@/lib/notify";
 import { authConfig } from "@/auth.config";
@@ -20,6 +20,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const isAdmin = ADMIN_EMAIL !== null && email === ADMIN_EMAIL;
         let dbUser = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
         if (!dbUser) {
+          // An admin can pre-approve a specific email (from /admin) before
+          // that person ever signs in — typically right after also adding
+          // them to Google's Test users list, so the whole thing "just
+          // works" for them with zero extra steps on either side.
+          const preapproved = (
+            await db.select().from(preapprovedEmails).where(eq(preapprovedEmails.email, email)).limit(1)
+          )[0];
+          const gmailAccessGranted = isAdmin || Boolean(preapproved);
+
           dbUser = (
             await db
               .insert(users)
@@ -27,18 +36,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 email,
                 name: profile.name ?? email.split("@")[0],
                 image: typeof profile.picture === "string" ? profile.picture : null,
-                gmailAccessGranted: isAdmin,
+                gmailAccessGranted,
               })
               .returning()
           )[0];
           await ensureDefaultCategories(dbUser.id);
+          if (preapproved) {
+            await db.delete(preapprovedEmails).where(eq(preapprovedEmails.id, preapproved.id));
+          }
+
           // Plain Google sign-in only needs a basic (non-sensitive-scope)
           // consent, which Google never restricts — so this fires for
           // literally anyone with a Google account, not just people already
           // on the Test users list. FYI-only, fired once ever per account,
           // never for ADMIN_EMAIL's own first sign-in.
           if (!isAdmin) {
-            waitUntil(notifyAdmin(`New Vyay user: ${email} — grant Gmail access from /admin once they're also added as a Google test user.`));
+            waitUntil(
+              notifyAdmin(
+                "New sign-up",
+                preapproved
+                  ? `${email} signed up and already had Gmail access pre-approved — they're all set, no action needed from you.`
+                  : `${email} signed up. Grant Gmail access from /admin once you've also added them as a Google test user.`,
+              ),
+            );
           }
         }
         token.uid = dbUser.id;
