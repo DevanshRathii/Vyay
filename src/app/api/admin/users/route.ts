@@ -17,6 +17,9 @@ export async function GET() {
       createdAt: users.createdAt,
       gmailAccessGranted: users.gmailAccessGranted,
       hasGmailConnection: gmailConnections.id,
+      initialSyncDone: gmailConnections.initialSyncDone,
+      syncStatus: gmailConnections.syncStatus,
+      totalSynced: gmailConnections.totalSynced,
     })
     .from(users)
     .leftJoin(gmailConnections, eq(gmailConnections.userId, users.id))

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, ExternalLink, MailCheck, Plus, ShieldOff, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Loader2, MailCheck, Plus, ShieldOff, X } from "lucide-react";
 import { useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, CardHeader, Input } from "@/components/ui";
@@ -12,6 +12,27 @@ interface AdminUserRow {
   createdAt: number;
   gmailAccessGranted: boolean;
   hasGmailConnection: boolean;
+  initialSyncDone: boolean | null;
+  syncStatus: string | null;
+  totalSynced: number | null;
+}
+
+function SyncBadge({ u }: { u: AdminUserRow }) {
+  if (!u.hasGmailConnection) return null;
+  if (u.initialSyncDone) {
+    return (
+      <Badge className="ml-2 align-middle">
+        <MailCheck className="h-3 w-3" /> Synced · {u.totalSynced ?? 0} imported
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="ml-2 align-middle">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      {u.syncStatus === "error" ? "Sync error" : "Syncing…"}
+      {u.totalSynced ? ` · ${u.totalSynced} so far` : ""}
+    </Badge>
+  );
 }
 
 interface PreapprovedRow {
@@ -179,11 +200,7 @@ export function AdminUsersPanel() {
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">
                   {u.name ?? u.email}
-                  {u.hasGmailConnection && (
-                    <Badge className="ml-2 align-middle">
-                      <MailCheck className="h-3 w-3" /> Connected
-                    </Badge>
-                  )}
+                  <SyncBadge u={u} />
                 </p>
                 <p className="truncate text-[12px] text-muted">
                   {u.email} · signed up {fmt(u.createdAt)}
