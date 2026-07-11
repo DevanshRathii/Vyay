@@ -11,6 +11,9 @@ const patchSchema = z.object({
   categoryId: z.string().nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
   deleted: z.boolean().optional(),
+  /** For keyed users only: the whole sensitive payload, re-sealed client-side
+   *  after editing notes. The server never decrypts it — just stores it. */
+  encPayload: z.string().optional(),
 });
 
 /** Edit category/notes, soft-delete, or restore a transaction. */
@@ -21,7 +24,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
-  const { categoryId, notes, deleted } = parsed.data;
+  const { categoryId, notes, deleted, encPayload } = parsed.data;
 
   const owned = (
     await db
@@ -47,6 +50,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (categoryId !== undefined) update.categoryId = categoryId;
   if (notes !== undefined) update.notes = notes;
   if (deleted !== undefined) update.deletedAt = deleted ? Date.now() : null;
+  if (encPayload !== undefined) update.encPayload = encPayload;
 
   await db.update(transactions).set(update).where(eq(transactions.id, id));
   return NextResponse.json({ ok: true });

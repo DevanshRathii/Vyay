@@ -2,8 +2,10 @@ import { and, count, eq, gte } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { apiTokens, categories, shortcutEvents } from "@/lib/db/schema";
+import { apiTokens, categories, shortcutEvents, users } from "@/lib/db/schema";
+import { amountBidx } from "@/lib/blind-index";
 import { sha256 } from "@/lib/crypto";
+import { sealForUser } from "@/lib/e2e-crypto";
 import { applyEventToTransaction, findCandidates } from "@/lib/match";
 
 export const dynamic = "force-dynamic";
@@ -86,16 +88,25 @@ export async function POST(req: Request) {
     cat = (await db.insert(categories).values({ userId, name: category }).returning())[0];
   }
 
+  const user = (await db.select({ publicKey: users.publicKey }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  const keyedValues = user?.publicKey
+    ? {
+        amountPaise: null,
+        amountBidx: amountBidx(userId, direction, amountPaise),
+        encPayload: sealForUser(user.publicKey, { amountPaise, notes: notes ?? null }),
+        notes: null,
+      }
+    : { amountPaise, notes: notes ?? null };
+
   const event = (
     await db
       .insert(shortcutEvents)
       .values({
         userId,
-        amountPaise,
         direction,
         categoryId: cat.id,
         categoryName: cat.name,
-        notes: notes ?? null,
+        ...keyedValues,
       })
       .returning()
   )[0];

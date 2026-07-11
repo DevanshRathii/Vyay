@@ -23,6 +23,7 @@ export async function GET() {
       candidates: (
         await findCandidates(userId, {
           amountPaise: e.amountPaise,
+          amountBidx: e.amountBidx,
           direction: e.direction,
           at: e.createdAt,
         })
@@ -33,6 +34,7 @@ export async function GET() {
         channel: t.channel,
         bank: t.bank,
         amountPaise: t.amountPaise,
+        encPayload: t.encPayload,
         categoryId: t.categoryId,
       })),
     })),

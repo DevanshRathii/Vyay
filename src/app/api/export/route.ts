@@ -1,8 +1,9 @@
 import { and, desc, eq } from "drizzle-orm";
 import ExcelJS from "exceljs";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { categories, transactions } from "@/lib/db/schema";
-import { getUserId, unauthorized } from "@/lib/session";
+import { getUserId, getUserPublicKey, unauthorized } from "@/lib/session";
 import { buildTransactionFilters } from "@/lib/transactions";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,13 @@ const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 export async function GET(req: Request) {
   const userId = await getUserId();
   if (!userId) return unauthorized();
+
+  if (await getUserPublicKey(userId)) {
+    return NextResponse.json(
+      { error: "Export for zero-access-encrypted accounts is built client-side." },
+      { status: 410 },
+    );
+  }
 
   const params = new URL(req.url).searchParams;
   const conds = buildTransactionFilters(userId, params);
@@ -55,7 +63,7 @@ export async function GET(req: Request) {
       time: ist.toISOString().slice(11, 19),
       channel: r.channel ?? "",
       party: r.merchant ?? r.upiId ?? "",
-      amount: r.amountPaise / 100,
+      amount: (r.amountPaise ?? 0) / 100,
       direction: r.direction === "debit" ? "Debit" : "Credit",
       category: r.categoryName ?? "",
       notes: r.notes ?? "",

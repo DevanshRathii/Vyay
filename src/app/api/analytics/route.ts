@@ -2,7 +2,7 @@ import { and, eq, gte, isNull, lte } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { categories, transactions } from "@/lib/db/schema";
-import { getUserId, unauthorized } from "@/lib/session";
+import { getUserId, getUserPublicKey, unauthorized } from "@/lib/session";
 import { istDateKey, istMonthKey } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,13 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const userId = await getUserId();
   if (!userId) return unauthorized();
+
+  if (await getUserPublicKey(userId)) {
+    return NextResponse.json(
+      { error: "Analytics for zero-access-encrypted accounts are computed client-side." },
+      { status: 410 },
+    );
+  }
 
   const params = new URL(req.url).searchParams;
   const now = Date.now();
@@ -48,39 +55,10 @@ export async function GET(req: Request) {
     return true;
   };
 
-  const allRows = await db
-    .select({
-      occurredAt: transactions.occurredAt,
-      amountPaise: transactions.amountPaise,
-      direction: transactions.direction,
-      categoryId: transactions.categoryId,
-      channel: transactions.channel,
-      merchant: transactions.merchantNormalized,
-      merchantRaw: transactions.merchant,
-    })
-    .from(transactions)
-    .where(
-      and(
-        eq(transactions.userId, userId),
-        isNull(transactions.deletedAt),
-        gte(transactions.occurredAt, Math.min(from, yearAgo)),
-        lte(transactions.occurredAt, to),
-      ),
-    );
-
-  const cats = await db.select().from(categories).where(eq(categories.userId, userId));
-  const catById = new Map(cats.map((c) => [c.id, c]));
-
-  const rows = allRows.filter(matchesFilters);
-  const inRange = rows.filter((r) => r.occurredAt >= from && r.occurredAt <= to);
-
-  // Previous period, same duration and same filters, for the trend badges on
-  // the stat cards. Skipped for "all time" (from=0 has no meaningful "before").
-  let previous: { debit: number; credit: number } | null = null;
-  if (from > 0) {
-    const duration = to - from;
-    const prevFrom = Math.max(0, from - duration);
-    const prevRows = await db
+  // amountPaise is only nullable for keyed accounts, which never reach this
+  // handler (guarded above) — coalesce to satisfy the shared column type.
+  const allRows = (
+    await db
       .select({
         occurredAt: transactions.occurredAt,
         amountPaise: transactions.amountPaise,
@@ -95,10 +73,45 @@ export async function GET(req: Request) {
         and(
           eq(transactions.userId, userId),
           isNull(transactions.deletedAt),
-          gte(transactions.occurredAt, prevFrom),
-          lte(transactions.occurredAt, from),
+          gte(transactions.occurredAt, Math.min(from, yearAgo)),
+          lte(transactions.occurredAt, to),
         ),
-      );
+      )
+  ).map((r) => ({ ...r, amountPaise: r.amountPaise ?? 0 }));
+
+  const cats = await db.select().from(categories).where(eq(categories.userId, userId));
+  const catById = new Map(cats.map((c) => [c.id, c]));
+
+  const rows = allRows.filter(matchesFilters);
+  const inRange = rows.filter((r) => r.occurredAt >= from && r.occurredAt <= to);
+
+  // Previous period, same duration and same filters, for the trend badges on
+  // the stat cards. Skipped for "all time" (from=0 has no meaningful "before").
+  let previous: { debit: number; credit: number } | null = null;
+  if (from > 0) {
+    const duration = to - from;
+    const prevFrom = Math.max(0, from - duration);
+    const prevRows = (
+      await db
+        .select({
+          occurredAt: transactions.occurredAt,
+          amountPaise: transactions.amountPaise,
+          direction: transactions.direction,
+          categoryId: transactions.categoryId,
+          channel: transactions.channel,
+          merchant: transactions.merchantNormalized,
+          merchantRaw: transactions.merchant,
+        })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.userId, userId),
+            isNull(transactions.deletedAt),
+            gte(transactions.occurredAt, prevFrom),
+            lte(transactions.occurredAt, from),
+          ),
+        )
+    ).map((r) => ({ ...r, amountPaise: r.amountPaise ?? 0 }));
     let pDebit = 0;
     let pCredit = 0;
     for (const r of prevRows.filter(matchesFilters)) {
