@@ -134,6 +134,7 @@ Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (
 | `DATABASE_URL` | yes | — | Postgres connection string used by the app at runtime. On Supabase, use the **transaction pooler** (port 6543) |
 | `MIGRATE_DATABASE_URL` | yes | — | Postgres connection string used only by `npx tsx migrate.ts`. On Supabase, use the **session pooler** or **direct connection** (port 5432) — never the transaction pooler. On Vercel specifically, the direct connection is IPv6-only and unreachable from build containers, so use the session pooler there |
 | `CRON_SECRET` | for Vercel Cron | — | Bearer token Vercel sends to `/api/cron/sync`; set it and Vercel supplies the header automatically |
+| `BLIND_INDEX_KEY` | yes | — | 32-byte base64 key (`openssl rand -base64 32`) used to derive blind-index HMACs for zero-access-encrypted accounts — preserves duplicate detection and Apple Shortcut amount matching without ever storing a plaintext amount. Server-only, never sent to the browser |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | yes | — | OAuth credentials (see above) — required for sign-in, not just Gmail |
 | `SYNC_LOOKBACK_MONTHS` | no | — (since 1-Jan-2026) | Initial sync window as a rolling number of months back; unset uses the fixed 1-Jan-2026 anchor instead |
 | `SYNC_INTERVAL_MINUTES` | no | `15` | Self-host background sync cadence (`0` disables — required on Vercel, which uses Cron instead) |
@@ -162,7 +163,7 @@ npm run db:seed      # demo account with sample data
 ### Vercel + Supabase (recommended)
 
 1. Create a Supabase project, then set `DATABASE_URL` (transaction pooler) and `MIGRATE_DATABASE_URL` (session pooler — see the env var table above for why) as Vercel **Production** environment variables: `vercel env add DATABASE_URL production` (paste the connection string when prompted, or pipe it in so it never lands in shell history).
-2. Set the rest of the production env vars the same way: `AUTH_SECRET`, `ENCRYPTION_KEY`, `CRON_SECRET` (generate fresh values for production — don't reuse local dev secrets — e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" | vercel env add ENCRYPTION_KEY production`), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_URL` (your Vercel production URL), `SYNC_INTERVAL_MINUTES=0`.
+2. Set the rest of the production env vars the same way: `AUTH_SECRET`, `ENCRYPTION_KEY`, `BLIND_INDEX_KEY`, `CRON_SECRET` (generate fresh values for production — don't reuse local dev secrets — e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" | vercel env add ENCRYPTION_KEY production`), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_URL` (your Vercel production URL), `SYNC_INTERVAL_MINUTES=0`.
 3. `package.json`'s `build` script runs `tsx migrate.ts && next build`, so every deploy applies pending migrations before building — no separate migrate step.
 4. `vercel deploy --prod`. `vercel.json` schedules a daily Vercel Cron hitting `/api/cron/sync` (`CRON_SECRET`-protected), which syncs every connected account oldest-first, stopping cleanly under the 300s function budget — any leftovers pick up on the next day's run or a manual "Sync now".
 5. In Google Cloud Console, add the production redirect URIs (`{APP_URL}/api/auth/callback/google` and `{APP_URL}/api/gmail/callback`) and add test users on the OAuth consent screen (up to 100 while unverified — see Troubleshooting).
@@ -203,13 +204,32 @@ Open `src/lib/parsing/providers.ts` and append an entry:
 - **A test user's Gmail connection stops working after ~7 days** — while the Google Cloud project's OAuth consent screen is in **Testing** mode (the default, and fine up to 100 users), Google expires refresh tokens for external test apps after 7 days of inactivity from Google's own review process, independent of anything Vyay does. Reconnecting Gmail in Settings fixes it. To avoid this entirely, either move the consent screen to **In production** (no formal verification needed at this user count for a `gmail.readonly`-only app, though Google may still show an "unverified app" warning to users) or accept the periodic reconnect.
 - **Vercel build fails with `ENETUNREACH` on the migration step** — `MIGRATE_DATABASE_URL` is pointed at Supabase's direct connection host, which is IPv6-only; Vercel's build containers have no outbound IPv6. Switch to the session pooler connection string (see the env var table above).
 
+## Zero-access encryption
+
+Vyay can seal your transaction data with a key only you hold, so that a database leak — or the operator browsing the database directly — cannot expose your financial data. This is honestly called **zero-access encryption**, not "end-to-end": the server legitimately sees plaintext transiently while parsing your Gmail (sync runs unattended via cron), then seals it and goes blind.
+
+**How it works:** each account holds an X25519 keypair. The **public key** is stored server-side; ingest uses it to *encrypt* (seal) transaction data as soon as it's parsed. The **private key** — your "personal key" — is generated in your browser, shown to you once, and stored only in that browser's `localStorage`. It is never sent to or stored by the server. Reads decrypt entirely client-side: search, sorting, the dashboard, and export all run in your browser over the decrypted rows.
+
+**Setup:** the first time you sign in after this feature ships, you'll see a one-time setup screen. Save the personal key it shows you (copy it, download the `.txt` file, or let your password manager offer to store it) — Vyay cannot recover it if lost. Existing data is sealed in the background (a one-time backfill); new mail is sealed as it's ingested from then on.
+
+**Lost key:** self-serve reset from Settings → "Your encryption key". This generates a new keypair, wipes the ciphertext under the lost key (unrecoverable anyway), and triggers a full Gmail resync to rebuild the ledger. Manual notes, category edits, and Apple Shortcut history don't survive a reset — only what re-imports from Gmail does, since Gmail remains the source of truth.
+
+**What's protected:** database dumps or leaks, Supabase dashboard/table-editor browsing, direct DBA access, stolen backups, and the PostgREST/Data-API surface (migration 0008 also enables Postgres RLS and revokes `anon`/`authenticated` grants on every table, closing Supabase's auto-generated REST API).
+
+**What's NOT protected** (never claimed otherwise): a compromised or malicious server at the moment of ingest — plaintext exists transiently in server memory while an email is being parsed — and Gmail itself, which always sees the original email.
+
+**Metadata that stays visible** even for a keyed account (documented, not a bug): timestamps, debit/credit direction, category assignment and category names, transaction counts, the Gmail message id, sync state, saved contact names, and your account email/name. Sealed fields: amount, merchant name, notes, UPI id, reference number, email subject, bank, card last-4, channel, and the original raw email body.
+
+**Scope (v1):** transactions and Apple Shortcut events. Contacts, categories, and feedback messages stay plaintext — a v2 candidate. Duplicate-alert detection and Shortcut amount matching keep working on encrypted rows via a server-side blind index (`BLIND_INDEX_KEY` — an HMAC of the amount, never the amount itself) instead of a plaintext equality check.
+
 ## Privacy & security
 
 - Gmail scope is read-only; nothing is ever written to your mailbox.
 - OAuth tokens are AES-256-GCM encrypted at rest, decrypted only in memory at the moment of a Gmail API call; API tokens are stored as SHA-256 hashes and shown once.
 - Sign-in is Google-only. Sessions are JWT-signed HTTP-only cookies.
 - Every table is scoped by `userId` — one user's Gmail sync, transactions, categories, contacts, and API tokens are never visible to another user, whether self-hosted or on the hosted multi-tenant deployment.
-- Raw email storage is truncated to the first 2,000 characters of body text, kept only for parse debugging.
+- Raw email storage is truncated to the first 2,000 characters of body text, kept only for parse debugging — sealed along with the rest of the sensitive fields for a keyed account (see "Zero-access encryption" above).
+- Optionally, seal your transaction data with zero-access encryption (above) so even a database leak or direct DB access can't expose it.
 - Your data lives in whichever Postgres database you point Vyay at — a database you control, whether that's Supabase, another managed host, or your own server.
 
 ## Roadmap ideas
