@@ -30,3 +30,22 @@ export function verifyKey(privateKey: string, keyCheckBlob: string, expectedPubl
     return false;
   }
 }
+
+/**
+ * Explicit, non-heuristic save-password prompt via the Credential Management
+ * API — Chrome/Edge only (Safari/Firefox don't implement it). Best-effort:
+ * every caller must ALSO put the key in a real, submitted <form> with a
+ * password field, since that form-submit event is what Safari/Firefox and
+ * extension-based managers (1Password, Bitwarden) key their own save
+ * prompt off of — this call is a supplement, not a replacement.
+ */
+export async function offerToSaveCredential(userId: string, privateKey: string): Promise<void> {
+  if (!("PasswordCredential" in window)) return;
+  try {
+    const cred = new (window as unknown as { PasswordCredential: new (opts: unknown) => Credential })
+      .PasswordCredential({ id: userId, password: privateKey, name: "Vyay personal key" });
+    await navigator.credentials.store(cred);
+  } catch {
+    // Never block on this — it's a nice-to-have, not the save mechanism.
+  }
+}

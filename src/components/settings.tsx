@@ -21,6 +21,7 @@ import useSWR from "swr";
 import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
 import { generateKeypair, makeKeyCheck } from "@/lib/e2e-crypto";
 import { useE2EOptional } from "@/components/e2e-provider";
+import { offerToSaveCredential } from "@/lib/key-store";
 import { buildLedgerWorkbook, exportFilename, type ExportRow } from "@/lib/export-core";
 import { useTransactions } from "@/lib/use-transactions";
 import { PROVIDERS } from "@/lib/parsing/providers";
@@ -533,6 +534,7 @@ function EncryptionKeyCard() {
         throw new Error(body.error ?? "Reset failed.");
       }
       await e2e!.applyNewKey(keypair.privateKey);
+      await offerToSaveCredential(e2e!.userId, keypair.privateKey);
       setNewKey(keypair.privateKey);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reset failed.");
@@ -564,22 +566,46 @@ function EncryptionKeyCard() {
               <code className="min-w-0 flex-1 truncate rounded-lg bg-card px-2.5 py-1.5 font-mono text-[12px]">
                 {newKey}
               </code>
-              <Button size="sm" variant="secondary" onClick={copyKey}>
+              <Button type="button" size="sm" variant="secondary" onClick={copyKey}>
                 {copied ? <Check className="h-3.5 w-3.5 text-positive" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? "Copied" : "Copy"}
               </Button>
             </div>
-            <Button
-              size="sm"
-              className="mt-3"
-              onClick={() => {
+            {/* Same real-form-submission trick as the first-time setup
+                screen — a plain button outside a <form> never gives
+                password managers a submit event to key their save prompt
+                off of. */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
                 setNewKey(null);
                 setConfirming(false);
                 setConfirmText("");
               }}
             >
-              Done
-            </Button>
+              <div className="sr-only">
+                <Label htmlFor="vyay-reset-username">Account (for your password manager)</Label>
+                <input
+                  id="vyay-reset-username"
+                  type="text"
+                  name="username"
+                  autoComplete="username"
+                  value={e2e.userId}
+                  readOnly
+                />
+              </div>
+              <input
+                type="password"
+                name="new-password"
+                autoComplete="new-password"
+                value={newKey}
+                readOnly
+                className="sr-only"
+              />
+              <Button type="submit" size="sm" className="mt-3">
+                Done
+              </Button>
+            </form>
           </div>
         ) : !confirming ? (
           <Button variant="danger" size="sm" className="w-fit" onClick={() => setConfirming(true)}>

@@ -4,12 +4,13 @@ import { createContext, useContext, useEffect, useState } from "react";
 import useSWR from "swr";
 import { Button, Card, Input, Label, Spinner } from "@/components/ui";
 import { generateKeypair, makeKeyCheck, openWithKey, sealForUser, type E2EDecryptError } from "@/lib/e2e-crypto";
-import { loadKey, saveKey, verifyKey } from "@/lib/key-store";
+import { loadKey, offerToSaveCredential, saveKey, verifyKey } from "@/lib/key-store";
 
 type Status = "checking" | "setup-required" | "locked" | "ready";
 
 interface E2EContextValue {
   status: Status;
+  userId: string;
   publicKey: string | null;
   /** Decrypts a sealed blob. Throws E2EDecryptError if not `ready`. */
   decrypt: <T = unknown>(blob: string) => T;
@@ -91,6 +92,7 @@ export function KeyProvider({ userId, children }: { userId: string; children: Re
 
   const value: E2EContextValue = {
     status,
+    userId,
     publicKey: data?.publicKey ?? null,
     decrypt: <T,>(blob: string) => {
       if (!privateKey) throw new Error("Not unlocked") as E2EDecryptError;
@@ -176,18 +178,7 @@ function SetupScreen({ userId, onComplete }: { userId: string; onComplete: (priv
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "Setup failed.");
       }
-      // Explicit, non-heuristic save prompt on Chromium browsers (Chrome,
-      // Edge) — Safari/Firefox don't implement this API, so the real form
-      // submission above is what covers them plus 1Password/Bitwarden.
-      if ("PasswordCredential" in window) {
-        try {
-          const cred = new (window as unknown as { PasswordCredential: new (opts: unknown) => Credential })
-            .PasswordCredential({ id: userId, password: keypair.privateKey, name: "Vyay personal key" });
-          await navigator.credentials.store(cred);
-        } catch {
-          // Best-effort — never block setup on this.
-        }
-      }
+      await offerToSaveCredential(userId, keypair.privateKey);
       await onComplete(keypair.privateKey);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Setup failed.");
