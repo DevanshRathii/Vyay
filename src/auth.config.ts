@@ -23,11 +23,7 @@ export const authConfig = {
     : [],
   callbacks: {
     session({ session, token }) {
-      if (token.uid && session.user) {
-        session.user.id = token.uid as string;
-        session.user.approved = Boolean(token.approved);
-        session.user.isAdmin = Boolean(token.isAdmin);
-      }
+      if (token.uid && session.user) session.user.id = token.uid as string;
       return session;
     },
   },

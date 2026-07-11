@@ -11,8 +11,6 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
-  UserCheck,
-  UserX,
   Unplug,
   Wand2,
 } from "lucide-react";
@@ -444,81 +442,6 @@ function ExportCard() {
   );
 }
 
-// ── Access requests (admin-only) ────────────────────────────────────────────
-// The list endpoint 403s for non-admins, so this card simply renders nothing
-// rather than checking session state client-side — no admin flag leaks to
-// the client bundle logic beyond "the fetch failed."
-
-interface AccessRequestRow {
-  id: string;
-  email: string;
-  name: string | null;
-  createdAt: number;
-}
-
-function AccessRequestsCard() {
-  const { data, error, mutate } = useSWR<{ rows: AccessRequestRow[] }>("/api/admin/access-requests");
-  const [busy, setBusy] = useState<string | null>(null);
-
-  if (error || !data) return null;
-
-  async function respond(id: string, action: "approve" | "deny") {
-    setBusy(id);
-    await fetch(`/api/admin/access-requests/${id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
-    setBusy(null);
-    mutate();
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title="Access requests"
-        subtitle="Vyay is invite-only while testing — approve new sign-ins here"
-        action={data.rows.length > 0 ? <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[12px] font-medium text-accent">{data.rows.length}</span> : undefined}
-      />
-      <div className="flex flex-col px-5 pb-5 pt-2">
-        {data.rows.length === 0 ? (
-          <p className="text-[13px] text-muted">No pending requests.</p>
-        ) : (
-          data.rows.map((r) => (
-            <div key={r.id} className="flex items-center gap-2 border-b border-line py-2.5 text-[13px] last:border-0">
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{r.name ?? r.email}</p>
-                <p className="truncate text-[12px] text-muted">
-                  {r.email} · {fmt(r.createdAt)}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy === r.id}
-                onClick={() => respond(r.id, "approve")}
-                aria-label={`Approve ${r.email}`}
-              >
-                <UserCheck className="h-3.5 w-3.5" /> Approve
-              </Button>
-              <Button
-                size="icon"
-                variant="danger"
-                className="h-8 w-8 shrink-0"
-                disabled={busy === r.id}
-                onClick={() => respond(r.id, "deny")}
-                aria-label={`Deny ${r.email}`}
-              >
-                <UserX className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          ))
-        )}
-      </div>
-    </Card>
-  );
-}
-
 // ── Apple Shortcut instructions ─────────────────────────────────────────────
 
 function ShortcutCard() {
@@ -568,7 +491,6 @@ export function SettingsPanels() {
     <Suspense>
       <div className="flex flex-col gap-4">
         <GmailCard />
-        <AccessRequestsCard />
         <TokensCard />
         <ExportCard />
         <ShortcutCard />

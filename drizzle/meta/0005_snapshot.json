@@ -1,5 +1,5 @@
 {
-  "id": "7ca41d55-a334-4020-81b5-0172c2ecf773",
+  "id": "13be4528-0ee8-4b29-8735-401f5df4ade7",
   "prevId": "d7dedfe8-9700-40b7-bf4e-b4d2ef0dd7eb",
   "version": "7",
   "dialect": "postgresql",
@@ -1026,13 +1026,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "approved": {
-          "name": "approved",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",

@@ -121,8 +121,8 @@ Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (
 | `SYNC_INTERVAL_MINUTES` | no | `15` | Self-host background sync cadence (`0` disables — required on Vercel, which uses Cron instead) |
 | `SYNC_MAX_INITIAL_MESSAGES` | no | `3000` | Initial sync safety cap |
 | `EXTRA_GMAIL_QUERY` | no | — | Extra Gmail search terms, e.g. `from:(mybank.com)` |
-| `ADMIN_EMAIL` | no | — | Auto-approved on first sign-in and gets the admin "Access requests" panel in Settings; every other new Google sign-in lands on `/pending-approval` until approved there (or via `UPDATE users SET approved = true` if unset) |
-| `ADMIN_NOTIFY_WEBHOOK_URL` | no | — | POSTed a Slack/Discord-shaped JSON body (`{ text, content }`) on a new pending access request or an in-app "urgent feedback" submission — point it at an incoming webhook, ntfy.sh topic, etc. |
+| `ADMIN_EMAIL` | no | — | Skips the "new user" notification for your own first sign-in. Doesn't gate access — while the app is unverified, Google's OAuth consent screen already restricts sign-in to the Test users you add in Cloud Console |
+| `ADMIN_NOTIFY_WEBHOOK_URL` | no | — | POSTed a Slack/Discord-shaped JSON body (`{ text, content }`) when a new user signs in for the first time, or submits the in-app "urgent feedback" button — point it at an incoming webhook, ntfy.sh topic, etc. |
 
 ## Commands
 

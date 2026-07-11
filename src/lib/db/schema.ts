@@ -28,10 +28,6 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name"),
   image: text("image"),
-  /** Gate on first Google sign-in — the app owner approves new users manually
-   *  (see ADMIN_EMAIL / ADMIN_NOTIFY_WEBHOOK_URL). Existing rows are
-   *  grandfathered to true by the migration that adds this column. */
-  approved: boolean("approved").notNull().default(false),
   createdAt: now(),
 });
 
