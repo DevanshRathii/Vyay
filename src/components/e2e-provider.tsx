@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import useSWR from "swr";
 import { Button, Card, Input, Label, Spinner } from "@/components/ui";
 import { generateKeypair, makeKeyCheck, openWithKey, sealForUser, type E2EDecryptError } from "@/lib/e2e-crypto";
-import { clearKey, loadKey, saveKey, verifyKey } from "@/lib/key-store";
+import { loadKey, saveKey, verifyKey } from "@/lib/key-store";
 
 type Status = "checking" | "setup-required" | "locked" | "ready";
 
@@ -16,7 +16,9 @@ interface E2EContextValue {
   /** Seals a value for the current user. Throws if not `ready`. */
   seal: (obj: unknown) => string;
   unlock: (pastedKey: string) => Promise<boolean>;
-  resetKey: () => Promise<void>;
+  /** Switches to a freshly reset keypair (after POST /api/e2e/reset
+   *  succeeds server-side) without a locked-screen bounce in between. */
+  applyNewKey: (newPrivateKey: string) => Promise<void>;
 }
 
 const E2EContext = createContext<E2EContextValue | null>(null);
@@ -80,10 +82,10 @@ export function KeyProvider({ userId, children }: { userId: string; children: Re
     return true;
   }
 
-  async function resetKey() {
-    clearKey(userId);
-    setPrivateKey(null);
-    setStatus("checking");
+  async function applyNewKey(newPrivateKey: string) {
+    saveKey(userId, newPrivateKey);
+    setPrivateKey(newPrivateKey);
+    setStatus("ready");
     await mutate();
   }
 
@@ -99,7 +101,7 @@ export function KeyProvider({ userId, children }: { userId: string; children: Re
       return sealForUser(data.publicKey, obj);
     },
     unlock,
-    resetKey,
+    applyNewKey,
   };
 
   if (status === "checking") {

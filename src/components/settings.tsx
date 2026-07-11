@@ -5,6 +5,7 @@ import {
   Copy,
   Download,
   KeyRound,
+  Lock,
   Mail,
   Plus,
   RefreshCw,
@@ -18,6 +19,10 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
+import { generateKeypair, makeKeyCheck } from "@/lib/e2e-crypto";
+import { useE2EOptional } from "@/components/e2e-provider";
+import { buildLedgerWorkbook, exportFilename, type ExportRow } from "@/lib/export-core";
+import { useTransactions } from "@/lib/use-transactions";
 import { PROVIDERS } from "@/lib/parsing/providers";
 
 // Banks first, then wallets/UPI apps (providers with no `bank` field) — all
@@ -108,6 +113,7 @@ function ProviderPicker({ selected, onToggle }: { selected: Set<string>; onToggl
 function GmailCard() {
   const params = useSearchParams();
   const oauthError = params.get("gmail_error");
+  const keyed = useE2EOptional()?.status === "ready";
   const { data, mutate } = useSWR<GmailStatus>("/api/gmail/status", {
     refreshInterval: (latest) => (latest?.syncStatus === "syncing" ? 1500 : 30000),
   });
@@ -296,9 +302,14 @@ function GmailCard() {
                   <ActionMenuItem disabled={syncing} onClick={() => syncNow(true)}>
                     <RefreshCw className="h-3.5 w-3.5" /> Full resync
                   </ActionMenuItem>
-                  <ActionMenuItem disabled={reparsing} onClick={reparse}>
-                    <Wand2 className={reparsing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Re-parse
-                  </ActionMenuItem>
+                  {/* Re-parse re-derives fields from the stored raw email, which
+                      keyed accounts don't keep in plaintext — Full resync
+                      (re-fetch + re-parse + re-seal) covers the same need. */}
+                  {!keyed && (
+                    <ActionMenuItem disabled={reparsing} onClick={reparse}>
+                      <Wand2 className={reparsing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Re-parse
+                    </ActionMenuItem>
+                  )}
                 </ActionMenu>
               </div>
             </div>
@@ -420,12 +431,53 @@ function TokensCard() {
 function ExportCard() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [building, setBuilding] = useState(false);
+  const keyed = useE2EOptional()?.status === "ready";
+  const { rows } = useTransactions();
 
   function download() {
     const p = new URLSearchParams();
     if (from) p.set("from", String(new Date(`${from}T00:00:00+05:30`).getTime()));
     if (to) p.set("to", String(new Date(`${to}T23:59:59+05:30`).getTime()));
     window.location.href = `/api/export?${p.toString()}`;
+  }
+
+  async function downloadKeyed() {
+    setBuilding(true);
+    try {
+      const fromMs = from ? new Date(`${from}T00:00:00+05:30`).getTime() : null;
+      const toMs = to ? new Date(`${to}T23:59:59+05:30`).getTime() : null;
+      const exportRows: ExportRow[] = rows
+        .filter((t) => t.deletedAt == null)
+        .filter((t) => (fromMs == null || t.occurredAt >= fromMs) && (toMs == null || t.occurredAt <= toMs))
+        .sort((a, b) => b.occurredAt - a.occurredAt)
+        .map((t) => ({
+          occurredAt: t.occurredAt,
+          channel: t.channel,
+          merchant: t.merchant,
+          upiId: t.upiId,
+          amountPaise: t.amountPaise,
+          direction: t.direction,
+          categoryName: t.categoryName,
+          notes: t.notes,
+        }));
+      // Dynamic import keeps exceljs (a sizable dependency) out of the main
+      // bundle — most sessions never export.
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = buildLedgerWorkbook(ExcelJS, exportRows);
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = exportFilename();
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBuilding(false);
+    }
   }
 
   return (
@@ -440,10 +492,129 @@ function ExportCard() {
           <Label htmlFor="to">To</Label>
           <Input id="to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
-        <Button onClick={download}>
-          <Download className="h-4 w-4" /> Download
+        <Button onClick={keyed ? downloadKeyed : download} disabled={building}>
+          {building ? <Spinner className="border-white/40 border-t-white" /> : <Download className="h-4 w-4" />}
+          Download
         </Button>
-        <p className="w-full text-[12px] text-muted">Leave the dates empty to export everything.</p>
+        <p className="w-full text-[12px] text-muted">
+          {keyed ? "Built in your browser — Vyay never sees the file." : "Leave the dates empty to export everything."}
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+// ── Encryption key ──────────────────────────────────────────────────────────
+
+function EncryptionKeyCard() {
+  const e2e = useE2EOptional();
+  const [confirming, setConfirming] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  if (!e2e || e2e.status !== "ready") return null;
+
+  async function reset() {
+    setBusy(true);
+    setError(null);
+    try {
+      const keypair = generateKeypair();
+      const keyCheck = makeKeyCheck(keypair.publicKey);
+      const res = await fetch("/api/e2e/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publicKey: keypair.publicKey, keyCheck }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Reset failed.");
+      }
+      await e2e!.applyNewKey(keypair.privateKey);
+      setNewKey(keypair.privateKey);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyKey() {
+    if (!newKey) return;
+    await navigator.clipboard.writeText(newKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Your encryption key" subtitle="Zero-access encryption — you hold the only key" />
+      <div className="flex flex-col gap-3 px-5 pb-5 pt-2 text-[13px]">
+        <p className="flex items-center gap-1.5 text-muted">
+          <Lock className="h-3.5 w-3.5 text-positive" /> Your transactions are sealed with a key only you hold — not
+          even Vyay&apos;s operator can read them.
+        </p>
+        {newKey ? (
+          <div className="rounded-xl border border-accent/40 bg-accent/5 p-3.5">
+            <p className="font-medium">Your new personal key — save it now</p>
+            <p className="mt-1 text-muted">This won&apos;t be shown again. Vyay is re-importing from Gmail.</p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-lg bg-card px-2.5 py-1.5 font-mono text-[12px]">
+                {newKey}
+              </code>
+              <Button size="sm" variant="secondary" onClick={copyKey}>
+                {copied ? <Check className="h-3.5 w-3.5 text-positive" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <Button
+              size="sm"
+              className="mt-3"
+              onClick={() => {
+                setNewKey(null);
+                setConfirming(false);
+                setConfirmText("");
+              }}
+            >
+              Done
+            </Button>
+          </div>
+        ) : !confirming ? (
+          <Button variant="danger" size="sm" className="w-fit" onClick={() => setConfirming(true)}>
+            Reset key
+          </Button>
+        ) : (
+          <div className="rounded-xl border border-negative/30 bg-negative/5 p-3.5">
+            <p className="font-medium text-negative">This cannot be undone</p>
+            <p className="mt-1 text-muted">
+              Resetting wipes your encrypted transactions and Shortcut history, then rebuilds your ledger from Gmail.
+              Notes and category edits you&apos;ve made don&apos;t survive — only what re-imports from your inbox
+              does.
+            </p>
+            <Label className="mt-3">Type RESET to confirm</Label>
+            <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="RESET" />
+            {error && <p className="mt-2 text-negative">{error}</p>}
+            <div className="mt-3 flex gap-2">
+              <Button variant="danger" size="sm" disabled={confirmText !== "RESET" || busy} onClick={reset}>
+                {busy ? <Spinner className="border-white/40 border-t-white" /> : null}
+                Wipe and re-import
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setConfirming(false);
+                  setConfirmText("");
+                  setError(null);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -498,6 +669,7 @@ export function SettingsPanels() {
     <Suspense>
       <div className="flex flex-col gap-4">
         <GmailCard />
+        <EncryptionKeyCard />
         <TokensCard />
         <ExportCard />
         <ShortcutCard />
