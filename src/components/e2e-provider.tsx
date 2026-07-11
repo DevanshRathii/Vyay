@@ -154,7 +154,15 @@ function SetupScreen({ userId, onComplete }: { userId: string; onComplete: (priv
     URL.revokeObjectURL(url);
   }
 
-  async function submit() {
+  async function submit(e: React.FormEvent) {
+    // Letting this be a real form submission (rather than a plain button
+    // onClick outside any form) is what gives password managers something
+    // to hook into — Chrome/Firefox/Safari's own save-password prompt, and
+    // extension-based managers (1Password, Bitwarden), key off an actual
+    // submit event on a form containing a password field. preventDefault()
+    // only stops the browser's default navigation; the event has already
+    // fired and password managers have already seen it by then.
+    e.preventDefault();
     setBusy(true);
     setError(null);
     try {
@@ -167,6 +175,18 @@ function SetupScreen({ userId, onComplete }: { userId: string; onComplete: (priv
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "Setup failed.");
+      }
+      // Explicit, non-heuristic save prompt on Chromium browsers (Chrome,
+      // Edge) — Safari/Firefox don't implement this API, so the real form
+      // submission above is what covers them plus 1Password/Bitwarden.
+      if ("PasswordCredential" in window) {
+        try {
+          const cred = new (window as unknown as { PasswordCredential: new (opts: unknown) => Credential })
+            .PasswordCredential({ id: userId, password: keypair.privateKey, name: "Vyay personal key" });
+          await navigator.credentials.store(cred);
+        } catch {
+          // Best-effort — never block setup on this.
+        }
       }
       await onComplete(keypair.privateKey);
     } catch (err) {
@@ -208,21 +228,26 @@ function SetupScreen({ userId, onComplete }: { userId: string; onComplete: (priv
           <code className="flex-1 truncate rounded-lg border border-line bg-card-2 px-3 py-2 text-[13px]">
             {keypair.privateKey}
           </code>
-          <Button variant="secondary" size="sm" onClick={copy}>
+          <Button type="button" variant="secondary" size="sm" onClick={copy}>
             {copied ? "Copied" : "Copy"}
           </Button>
         </div>
-        <Button variant="secondary" size="sm" className="mt-2 w-full" onClick={downloadKeyFile}>
+        <Button type="button" variant="secondary" size="sm" className="mt-2 w-full" onClick={downloadKeyFile}>
           Download key file (.txt)
         </Button>
 
-        {/* A real password field inside a form gives browser/1Password/iCloud
-            Keychain password managers something to offer to save — the
-            sanctioned "backup" channel. Never submitted anywhere. */}
-        <form className="mt-3" onSubmit={(e) => e.preventDefault()}>
-          <Label htmlFor="vyay-key-username">Account (for your password manager)</Label>
-          <input id="vyay-key-username" type="text" name="username" autoComplete="username" value={userId} readOnly className="sr-only" />
-          <Label htmlFor="vyay-key-password" className="mt-2">
+        {/* One real <form>, submitted for real (not just a button outside a
+            form calling fetch) — that submit event is what browser and
+            extension password managers (Chrome/Safari, 1Password, Bitwarden)
+            key their save-password prompt off of. preventDefault() inside
+            the handler only stops navigation; the event has already reached
+            them by then. */}
+        <form onSubmit={submit}>
+          <div className="sr-only">
+            <Label htmlFor="vyay-key-username">Account (for your password manager)</Label>
+            <input id="vyay-key-username" type="text" name="username" autoComplete="username" value={userId} readOnly />
+          </div>
+          <Label htmlFor="vyay-key-password" className="mt-3">
             Personal key (for your password manager)
           </Label>
           <input
@@ -234,24 +259,24 @@ function SetupScreen({ userId, onComplete }: { userId: string; onComplete: (priv
             readOnly
             className="w-full rounded-lg border border-line bg-card-2 px-3 py-2 text-[13px]"
           />
+
+          <label className="mt-4 flex items-start gap-2 text-[13px]">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
+            />
+            I&apos;ve saved my key — I understand Vyay cannot recover it.
+          </label>
+
+          {error && <p className="mt-2 text-[13px] text-negative">{error}</p>}
+
+          <Button type="submit" className="mt-4 w-full" disabled={!confirmed || busy}>
+            {busy ? <Spinner className="border-white/40 border-t-white" /> : null}
+            {busy ? "Setting up…" : "Continue"}
+          </Button>
         </form>
-
-        <label className="mt-4 flex items-start gap-2 text-[13px]">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            onChange={(e) => setConfirmed(e.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
-          />
-          I&apos;ve saved my key — I understand Vyay cannot recover it.
-        </label>
-
-        {error && <p className="mt-2 text-[13px] text-negative">{error}</p>}
-
-        <Button className="mt-4 w-full" disabled={!confirmed || busy} onClick={submit}>
-          {busy ? <Spinner className="border-white/40 border-t-white" /> : null}
-          {busy ? "Setting up…" : "Continue"}
-        </Button>
 
         {busy && (
           <p className="mt-2 text-center text-[12px] text-muted">
