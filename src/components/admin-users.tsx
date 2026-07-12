@@ -3,7 +3,8 @@
 import { Check, Copy, ExternalLink, Loader2, MailCheck, Plus, ShieldOff, X } from "lucide-react";
 import { useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { Badge, Button, Card, CardHeader, Input } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Empty, Input } from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 interface AdminUserRow {
   id: string;
@@ -226,6 +227,126 @@ export function AdminUsersPanel() {
                   <MailCheck className="h-3.5 w-3.5" /> Grant Gmail access
                 </Button>
               )}
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ── Parse health ────────────────────────────────────────────────────────────
+
+interface ParseHealthRow {
+  id: string;
+  provider: string;
+  totalCount: number;
+  merchantHits: number;
+  upiHits: number;
+  refHits: number;
+  categorizedHits: number;
+  updatedAt: number;
+}
+
+function pct(hits: number, total: number): number {
+  return total === 0 ? 0 : Math.round((hits / total) * 100);
+}
+
+function HealthBar({ label, hits, total }: { label: string; hits: number; total: number }) {
+  const p = pct(hits, total);
+  return (
+    <div className="min-w-[90px] flex-1">
+      <div className="mb-0.5 flex items-center justify-between text-[11px] text-muted">
+        <span>{label}</span>
+        <span className={cn("font-medium", p < 30 ? "text-negative" : p < 70 ? "text-amber-500" : "text-positive")}>
+          {p}%
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-card-2">
+        <div
+          className={cn("h-full rounded-full", p < 30 ? "bg-negative" : p < 70 ? "bg-amber-500" : "bg-positive")}
+          style={{ width: `${Math.max(3, p)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Per-provider extraction-quality dashboard — catches the next "Canara"
+ *  (a whole bank silently extracting/categorizing nothing) before a user
+ *  has to notice and complain. */
+export function ParseHealthPanel() {
+  const { data } = useSWR<{ rows: ParseHealthRow[] }>("/api/admin/parse-health");
+
+  return (
+    <Card>
+      <CardHeader title="Parse health" subtitle="Extraction quality by bank/payment app — low numbers mean missing fixtures" />
+      <div className="flex flex-col gap-3 px-5 pb-5 pt-2">
+        {!data ? null : data.rows.length === 0 ? (
+          <p className="text-[12px] text-muted">No transactions ingested since this went live.</p>
+        ) : (
+          data.rows.map((r) => (
+            <div key={r.id} className="border-b border-line pb-3 last:border-0 last:pb-0">
+              <div className="mb-1.5 flex items-center justify-between text-[13px]">
+                <span className="font-medium capitalize">{r.provider}</span>
+                <span className="text-muted">{r.totalCount} txn{r.totalCount === 1 ? "" : "s"}</span>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <HealthBar label="Merchant" hits={r.merchantHits} total={r.totalCount} />
+                <HealthBar label="UPI id" hits={r.upiHits} total={r.totalCount} />
+                <HealthBar label="Ref" hits={r.refHits} total={r.totalCount} />
+                <HealthBar label="Categorized" hits={r.categorizedHits} total={r.totalCount} />
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ── Donated parse samples ───────────────────────────────────────────────────
+
+interface ParseSampleRow {
+  id: string;
+  kind: "email" | "sms";
+  text: string;
+  note: string | null;
+  createdAt: number;
+  reporterEmail: string | null;
+}
+
+export function ParseSamplesPanel() {
+  const { data, mutate } = useSWR<{ rows: ParseSampleRow[] }>("/api/admin/parse-samples");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function resolve(id: string) {
+    setBusy(id);
+    await fetch(`/api/admin/parse-samples/${id}`, { method: "POST" });
+    setBusy(null);
+    mutate();
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Donated parse samples" subtitle="Reported by users via “Report a bad parse” in the Ledger" />
+      <div className="flex flex-col gap-3 px-5 pb-5 pt-2">
+        {!data ? null : data.rows.length === 0 ? (
+          <Empty title="Nothing reported" hint="Bad-parse reports from the Ledger will show up here." />
+        ) : (
+          data.rows.map((s) => (
+            <div key={s.id} className="rounded-xl border border-line p-3.5">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-[12px] text-muted">
+                  <Badge>{s.kind}</Badge>
+                  {s.reporterEmail ?? "unknown"} · {fmt(s.createdAt)}
+                </span>
+                <Button size="sm" variant="secondary" disabled={busy === s.id} onClick={() => resolve(s.id)}>
+                  <Check className="h-3.5 w-3.5" /> Mark resolved
+                </Button>
+              </div>
+              {s.note && <p className="mb-2 text-[12px] text-muted">“{s.note}”</p>}
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-card-2 p-2.5 text-[12px]">{s.text}</pre>
             </div>
           ))
         )}

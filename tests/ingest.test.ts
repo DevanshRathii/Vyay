@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // In-process Postgres (PGlite) — same harness as the other DB-backed tests.
 vi.mock("@/lib/db", async () => (await import("./helpers/pglite")).createTestDb());
 
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { transactions, users } from "@/lib/db/schema";
+import { parseHealthStats, transactions, users } from "@/lib/db/schema";
 import { loadCategorizerContext, ensureDefaultCategories } from "@/lib/categorize";
 import { loadContactContext } from "@/lib/contacts/match";
 import { generateKeypair, openWithKey } from "@/lib/e2e-crypto";
@@ -28,6 +29,7 @@ let userId: string;
 
 beforeEach(async () => {
   await db.delete(transactions);
+  await db.delete(parseHealthStats);
   await db.delete(users);
   const rows = await db.insert(users).values({ email: `u${Math.random()}@t.io` }).returning();
   userId = rows[0].id;
@@ -110,5 +112,30 @@ describe("ingestEmail — keyed", () => {
     await ingest(hdfcUpiDebit("m1"), publicKey);
     const second = await ingest(hdfcUpiDebit("m1"), publicKey);
     expect(second.status).toBe("duplicate-message");
+  });
+});
+
+describe("ingestEmail — parse-health telemetry", () => {
+  it("records a hit for a fully-extracted transaction, keyed and non-keyed alike", async () => {
+    await ingest(hdfcUpiDebit("m1"));
+    const [stat] = await db.select().from(parseHealthStats).where(eq(parseHealthStats.provider, "hdfc"));
+    expect(stat.totalCount).toBe(1);
+    expect(stat.merchantHits).toBe(1);
+    expect(stat.upiHits).toBe(1);
+    expect(stat.refHits).toBe(1);
+    expect(stat.categorizedHits).toBe(1);
+
+    const { publicKey } = generateKeypair();
+    await ingest(hdfcUpiDebit("m2"), publicKey);
+    const [stat2] = await db.select().from(parseHealthStats).where(eq(parseHealthStats.provider, "hdfc"));
+    expect(stat2.totalCount).toBe(2);
+    expect(stat2.merchantHits).toBe(2);
+  });
+
+  it("does not record a second hit for a duplicate-message re-ingest", async () => {
+    await ingest(hdfcUpiDebit("m1"));
+    await ingest(hdfcUpiDebit("m1"));
+    const [stat] = await db.select().from(parseHealthStats).where(eq(parseHealthStats.provider, "hdfc"));
+    expect(stat.totalCount).toBe(1);
   });
 });

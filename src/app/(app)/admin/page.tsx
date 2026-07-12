@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/nav";
 import { getIsAdmin } from "@/lib/session";
-import { AdminUsersPanel, PreapprovedPanel } from "@/components/admin-users";
+import { AdminUsersPanel, ParseHealthPanel, ParseSamplesPanel, PreapprovedPanel } from "@/components/admin-users";
 
 export const metadata = { title: "Admin" };
 
@@ -13,6 +13,8 @@ export default async function AdminPage() {
       <div className="flex flex-col gap-4">
         <PreapprovedPanel />
         <AdminUsersPanel />
+        <ParseHealthPanel />
+        <ParseSamplesPanel />
       </div>
     </>
   );

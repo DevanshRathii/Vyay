@@ -1,6 +1,6 @@
-import { and, eq, gte, isNull, lte, ne, or } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { transactions, type Transaction } from "@/lib/db/schema";
+import { parseHealthStats, transactions, type Transaction } from "@/lib/db/schema";
 import { amountBidx } from "@/lib/blind-index";
 import { categorize, type CategorizerContext } from "@/lib/categorize";
 import { matchContact, type ContactContext } from "@/lib/contacts/match";
@@ -32,6 +32,41 @@ export interface TransactionEncPayload {
   cardLast4: string | null;
   channel: string | null;
   raw: string | null;
+}
+
+/**
+ * Operational telemetry, not user data — see parseHealthStats' schema
+ * comment. Best-effort: a failure here must never break ingest.
+ */
+async function recordParseHealth(
+  provider: string,
+  hits: { merchant: boolean; upiId: boolean; ref: boolean; categorized: boolean },
+): Promise<void> {
+  try {
+    await db
+      .insert(parseHealthStats)
+      .values({
+        provider,
+        totalCount: 1,
+        merchantHits: hits.merchant ? 1 : 0,
+        upiHits: hits.upiId ? 1 : 0,
+        refHits: hits.ref ? 1 : 0,
+        categorizedHits: hits.categorized ? 1 : 0,
+      })
+      .onConflictDoUpdate({
+        target: parseHealthStats.provider,
+        set: {
+          totalCount: sql`${parseHealthStats.totalCount} + 1`,
+          merchantHits: sql`${parseHealthStats.merchantHits} + ${hits.merchant ? 1 : 0}`,
+          upiHits: sql`${parseHealthStats.upiHits} + ${hits.upiId ? 1 : 0}`,
+          refHits: sql`${parseHealthStats.refHits} + ${hits.ref ? 1 : 0}`,
+          categorizedHits: sql`${parseHealthStats.categorizedHits} + ${hits.categorized ? 1 : 0}`,
+          updatedAt: Date.now(),
+        },
+      });
+  } catch (err) {
+    console.error(`[vyay] parse-health record failed for provider ${provider}:`, err);
+  }
 }
 
 async function flagPotentialDuplicate(txn: Transaction, amountPaise: number): Promise<void> {
@@ -164,6 +199,12 @@ export async function ingestEmail(
 
   if (!inserted) return { status: "duplicate-message" };
 
+  await recordParseHealth(parsed.provider, {
+    merchant: Boolean(merchant),
+    upiId: Boolean(parsed.upiId),
+    ref: Boolean(parsed.referenceNumber),
+    categorized: Boolean(category.categoryId),
+  });
   await flagPotentialDuplicate(inserted, parsed.amountPaise);
   await tryResolvePendingShortcuts(userId, inserted, parsed.amountPaise);
   return { status: "inserted", transaction: inserted };

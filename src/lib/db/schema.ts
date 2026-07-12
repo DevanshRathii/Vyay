@@ -254,6 +254,51 @@ export const preapprovedEmails = pgTable("preapproved_emails", {
   createdAt: now(),
 });
 
+/**
+ * Operational telemetry only — NOT per-user data, no userId, no message
+ * content. Running counts keyed by parser provider id (src/lib/parsing/
+ * providers.ts), incremented atomically at ingest. Deliberately separate
+ * from `transactions` so this works identically for keyed accounts, whose
+ * `bank`/merchant columns are sealed and unreadable server-side — the
+ * counts are derived from values already in hand transiently at ingest,
+ * before sealing, and never touch per-user encrypted storage.
+ */
+export const parseHealthStats = pgTable("parse_health_stats", {
+  id: id(),
+  provider: text("provider").notNull().unique(),
+  totalCount: integer("total_count").notNull().default(0),
+  merchantHits: integer("merchant_hits").notNull().default(0),
+  upiHits: integer("upi_hits").notNull().default(0),
+  refHits: integer("ref_hits").notNull().default(0),
+  categorizedHits: integer("categorized_hits").notNull().default(0),
+  updatedAt: epochMs("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
+
+/**
+ * User-donated parse-failure samples ("Report a bad parse" in the Ledger).
+ * Stored in the clear BY INTENT — the user reviews and can edit/redact the
+ * text before submitting; this is a knowing donation for improving parsing,
+ * not transaction data, and is unrelated to the zero-access encryption
+ * boundary (which protects data the user didn't choose to share).
+ */
+export const parseSamples = pgTable(
+  "parse_samples",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // email | sms
+    text: text("text").notNull(),
+    note: text("note"),
+    resolved: boolean("resolved").notNull().default(false),
+    createdAt: now(),
+  },
+  (t) => [index("parse_samples_resolved_idx").on(t.resolved)],
+);
+
 export type User = typeof users.$inferSelect;
 export type GmailConnection = typeof gmailConnections.$inferSelect;
 export type Category = typeof categories.$inferSelect;
@@ -264,3 +309,5 @@ export type ShortcutEvent = typeof shortcutEvents.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
 export type FeedbackMessage = typeof feedbackMessages.$inferSelect;
 export type PreapprovedEmail = typeof preapprovedEmails.$inferSelect;
+export type ParseHealthStat = typeof parseHealthStats.$inferSelect;
+export type ParseSample = typeof parseSamples.$inferSelect;
