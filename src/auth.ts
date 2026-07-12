@@ -60,6 +60,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               ),
             );
           }
+        } else if (!dbUser.gmailAccessGranted) {
+          // Heal the signed-up-before-being-preapproved ordering: the
+          // creation branch above only consumes a preapproval at first
+          // sign-in, so an email added to the list AFTER the account
+          // already existed would otherwise sit unconsumed forever while
+          // the user stays locked out of Gmail connect.
+          const preapproved = (
+            await db.select().from(preapprovedEmails).where(eq(preapprovedEmails.email, email)).limit(1)
+          )[0];
+          if (preapproved) {
+            await db.update(users).set({ gmailAccessGranted: true }).where(eq(users.id, dbUser.id));
+            await db.delete(preapprovedEmails).where(eq(preapprovedEmails.id, preapproved.id));
+          }
         }
         token.uid = dbUser.id;
       } else if (user?.id) {

@@ -6,6 +6,7 @@ import {
   Download,
   KeyRound,
   Lock,
+  LogOut,
   Mail,
   Plus,
   RefreshCw,
@@ -16,8 +17,10 @@ import {
   Wand2,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
+import { ThemeToggle } from "@/components/nav";
 import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
 import { generateKeypair, makeKeyCheck } from "@/lib/e2e-crypto";
 import { useE2EOptional } from "@/components/e2e-provider";
@@ -685,6 +688,33 @@ function ShortcutCard() {
           <Smartphone className="h-3.5 w-3.5" /> Tip: add the shortcut to your Home Screen or an Action Button for
           one-tap logging.
         </p>
+      </div>
+    </Card>
+  );
+}
+
+// ── Account ─────────────────────────────────────────────────────────────────
+// Rendered by the real settings page only, NOT inside SettingsPanels — the
+// demo shell reuses SettingsPanels and must not show a sign-out. This is
+// also the only sign-out reachable on phones: the sidebar footer (which has
+// one on desktop) is hidden below the `sm` breakpoint, and the mobile
+// bottom tab bar carries nav items only.
+
+export function AccountCard({ name, email }: { name: string | null; email: string | null }) {
+  return (
+    <Card>
+      <CardHeader title="Account" subtitle="Signed in with Google" />
+      <div className="flex items-center justify-between gap-3 px-5 pb-5 pt-2">
+        <div className="min-w-0">
+          <p className="truncate text-[14px] font-medium">{name ?? email ?? "Account"}</p>
+          {name && email && <p className="truncate text-[12px] text-muted">{email}</p>}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <ThemeToggle />
+          <Button variant="secondary" size="sm" onClick={() => signOut({ callbackUrl: "/login" })}>
+            <LogOut className="h-3.5 w-3.5" /> Sign out
+          </Button>
+        </div>
       </div>
     </Card>
   );

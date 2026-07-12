@@ -67,6 +67,32 @@ describe("users.gmailAccessGranted — gates the Gmail-connect flow, not sign-in
   });
 });
 
+/** Mirrors the existing-user heal branch in auth.ts's jwt callback. */
+async function signInExisting(email: string) {
+  const dbUser = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
+  if (!dbUser.gmailAccessGranted) {
+    const preapproved = (
+      await db.select().from(preapprovedEmails).where(eq(preapprovedEmails.email, email)).limit(1)
+    )[0];
+    if (preapproved) {
+      await db.update(users).set({ gmailAccessGranted: true }).where(eq(users.id, dbUser.id));
+      await db.delete(preapprovedEmails).where(eq(preapprovedEmails.id, preapproved.id));
+    }
+  }
+  return (await db.select().from(users).where(eq(users.id, dbUser.id)))[0];
+}
+
+/** Mirrors the grant-directly branch in POST /api/admin/preapproved. */
+async function preapprove(email: string) {
+  const existing = (await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1))[0];
+  if (existing) {
+    await db.update(users).set({ gmailAccessGranted: true }).where(eq(users.id, existing.id));
+    return { grantedExistingUser: true };
+  }
+  await db.insert(preapprovedEmails).values({ email }).onConflictDoNothing();
+  return { grantedExistingUser: false };
+}
+
 describe("preapprovedEmails — pre-approve someone before their first sign-in", () => {
   it("grants Gmail access immediately for a pre-approved email, and consumes the row", async () => {
     const email = `pre${Math.random()}@t.io`;
@@ -90,5 +116,41 @@ describe("preapprovedEmails — pre-approve someone before their first sign-in",
     expect(user.gmailAccessGranted).toBe(false);
     const stillThere = await db.select().from(preapprovedEmails);
     expect(stillThere).toHaveLength(1);
+  });
+});
+
+describe("preapproval after the account already exists (signed-up-first ordering)", () => {
+  it("preapproving an existing user's email grants directly instead of queueing a row", async () => {
+    const email = `existing${Math.random()}@t.io`;
+    await signUp(email); // signed up first, no preapproval — not granted
+    const result = await preapprove(email);
+    expect(result.grantedExistingUser).toBe(true);
+
+    const user = (await db.select().from(users).where(eq(users.email, email)))[0];
+    expect(user.gmailAccessGranted).toBe(true);
+    expect(await db.select().from(preapprovedEmails)).toHaveLength(0);
+  });
+
+  it("a stale preapproval row (added while the account existed) is consumed at next sign-in", async () => {
+    const email = `stale${Math.random()}@t.io`;
+    await signUp(email);
+    // Row added out-of-band after signup — the exact state that locked out
+    // a real user (approved-list entry present, but access never granted).
+    await db.insert(preapprovedEmails).values({ email });
+
+    const healed = await signInExisting(email);
+    expect(healed.gmailAccessGranted).toBe(true);
+    expect(await db.select().from(preapprovedEmails)).toHaveLength(0);
+  });
+
+  it("sign-in for an already-granted user leaves unrelated preapprovals alone", async () => {
+    const email = `granted${Math.random()}@t.io`;
+    await db.insert(preapprovedEmails).values({ email });
+    await signUp(email); // consumes it, granted
+    await db.insert(preapprovedEmails).values({ email: `someoneelse${Math.random()}@t.io` });
+
+    const user = await signInExisting(email);
+    expect(user.gmailAccessGranted).toBe(true);
+    expect(await db.select().from(preapprovedEmails)).toHaveLength(1);
   });
 });
