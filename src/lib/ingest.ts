@@ -1,7 +1,7 @@
 import { and, eq, gte, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { parseHealthStats, transactions, type Transaction } from "@/lib/db/schema";
-import { amountBidx } from "@/lib/blind-index";
+import { amountBidx, refBidx } from "@/lib/blind-index";
 import { categorize, type CategorizerContext } from "@/lib/categorize";
 import { matchContact, type ContactContext } from "@/lib/contacts/match";
 import { sealForUser } from "@/lib/e2e-crypto";
@@ -69,8 +69,58 @@ async function recordParseHealth(
   }
 }
 
-async function flagPotentialDuplicate(txn: Transaction, amountPaise: number): Promise<void> {
-  // Match on either the plaintext amount or its blind index — a row is only
+/**
+ * Cross-source duplicate detection — the same payment can be seen by more
+ * than one ingestion source (email + SMS + statement, once those exist),
+ * so this looks for either signal:
+ *   - Reference match (strong): a bank reference number (UPI RRN/UTR) is
+ *     the same money moving once, regardless of how far apart the two rows
+ *     landed in time — a statement backfilled weeks later still matches.
+ *   - Amount+time match (weak, existing behavior): same amount/direction
+ *     within a tight window, for sources with no reference number.
+ * First-ingested row is canonical; the later one gets duplicateOfId.
+ */
+async function flagPotentialDuplicate(
+  txn: Transaction,
+  amountPaise: number,
+  referenceNumber: string | null,
+): Promise<void> {
+  const baseConds = [
+    eq(transactions.userId, txn.userId),
+    ne(transactions.id, txn.id),
+    isNull(transactions.deletedAt),
+    isNull(transactions.duplicateOfId),
+  ];
+
+  // Reference match first (strong signal, any time distance) — a bank
+  // reference number (UPI RRN/UTR) is the same money moving once, so this
+  // catches e.g. a statement backfilled weeks after the original email.
+  if (referenceNumber) {
+    const refIndex = refBidx(txn.userId, referenceNumber);
+    const refTwin = (
+      await db
+        .select()
+        .from(transactions)
+        .where(
+          and(
+            ...baseConds,
+            refIndex
+              ? or(eq(transactions.referenceNumber, referenceNumber), eq(transactions.refBidx, refIndex))
+              : eq(transactions.referenceNumber, referenceNumber),
+          ),
+        )
+        .limit(1)
+    )[0];
+    if (refTwin) {
+      await db.update(transactions).set({ duplicateOfId: refTwin.id }).where(eq(transactions.id, txn.id));
+      txn.duplicateOfId = refTwin.id;
+      return;
+    }
+  }
+
+  // Fall back to amount+time (weak signal, tight window) — for sources with
+  // no reference number, or when the reference didn't match anything yet.
+  // Match on either the plaintext value or its blind index — a row is only
   // ever missing one of the two (never both), and matching both lets a
   // freshly-keyed user's dedup window still catch a twin from just before
   // their backfill completed. See src/lib/blind-index.ts.
@@ -81,14 +131,11 @@ async function flagPotentialDuplicate(txn: Transaction, amountPaise: number): Pr
       .from(transactions)
       .where(
         and(
-          eq(transactions.userId, txn.userId),
+          ...baseConds,
           or(eq(transactions.amountPaise, amountPaise), eq(transactions.amountBidx, bidx)),
           eq(transactions.direction, txn.direction),
           gte(transactions.occurredAt, txn.occurredAt - DUPLICATE_WINDOW_MS),
           lte(transactions.occurredAt, txn.occurredAt + DUPLICATE_WINDOW_MS),
-          ne(transactions.id, txn.id),
-          isNull(transactions.deletedAt),
-          isNull(transactions.duplicateOfId),
         ),
       )
       .limit(1)
@@ -166,6 +213,7 @@ export async function ingestEmail(
         ...base,
         amountPaise: null,
         amountBidx: amountBidx(userId, parsed.direction, parsed.amountPaise),
+        refBidx: parsed.referenceNumber ? refBidx(userId, parsed.referenceNumber) : null,
         encPayload: sealForUser(publicKey, {
           amountPaise: parsed.amountPaise,
           merchant: merchant ?? null,
@@ -205,7 +253,7 @@ export async function ingestEmail(
     ref: Boolean(parsed.referenceNumber),
     categorized: Boolean(category.categoryId),
   });
-  await flagPotentialDuplicate(inserted, parsed.amountPaise);
+  await flagPotentialDuplicate(inserted, parsed.amountPaise, parsed.referenceNumber ?? null);
   await tryResolvePendingShortcuts(userId, inserted, parsed.amountPaise);
   return { status: "inserted", transaction: inserted };
 }

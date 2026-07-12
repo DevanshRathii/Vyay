@@ -452,7 +452,7 @@ function ExportCard() {
       const fromMs = from ? new Date(`${from}T00:00:00+05:30`).getTime() : null;
       const toMs = to ? new Date(`${to}T23:59:59+05:30`).getTime() : null;
       const exportRows: ExportRow[] = rows
-        .filter((t) => t.deletedAt == null)
+        .filter((t) => t.deletedAt == null && t.duplicateOfId == null)
         .filter((t) => (fromMs == null || t.occurredAt >= fromMs) && (toMs == null || t.occurredAt <= toMs))
         .sort((a, b) => b.occurredAt - a.occurredAt)
         .map((t) => ({

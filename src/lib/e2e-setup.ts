@@ -1,7 +1,7 @@
 import { and, count, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { shortcutEvents, transactions } from "@/lib/db/schema";
-import { amountBidx } from "@/lib/blind-index";
+import { amountBidx, refBidx } from "@/lib/blind-index";
 import { sealForUser } from "@/lib/e2e-crypto";
 import type { TransactionEncPayload } from "@/lib/ingest";
 
@@ -41,6 +41,7 @@ export async function backfillUser(userId: string, publicKey: string): Promise<v
         .set({
           encPayload: sealForUser(publicKey, payload),
           amountBidx: amountBidx(userId, row.direction, row.amountPaise ?? 0),
+          refBidx: row.referenceNumber ? refBidx(userId, row.referenceNumber) : null,
           amountPaise: null,
           merchant: null,
           merchantNormalized: null,

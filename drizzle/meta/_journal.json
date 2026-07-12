@@ -71,6 +71,13 @@
       "when": 1783852733936,
       "tag": "0009_calm_mauler",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783853213610,
+      "tag": "0010_purple_phantom_reporter",
+      "breakpoints": true
     }
   ]
 }

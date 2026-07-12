@@ -26,3 +26,23 @@ export function amountBidx(userId: string, direction: string, amountPaise: numbe
   const mac = hmac(sha256, keyBytes(), new TextEncoder().encode(`${userId}:${direction}:${amountPaise}`));
   return Buffer.from(mac).toString("hex");
 }
+
+/** Strip everything but letters/digits and lowercase — bank reference
+ *  numbers (UPI RRN, UTR) are formatted inconsistently across a bank's own
+ *  channels (email vs SMS vs statement narration adds spaces/dashes). */
+export function normalizeReference(referenceNumber: string): string {
+  return referenceNumber.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** Below this length a normalized reference is too short to trust as a
+ *  strong duplicate signal (avoids collisions on junk/truncated refs). */
+const MIN_REF_LENGTH = 6;
+
+/** null when the reference isn't distinctive enough to index — callers must
+ *  fall back to the weaker amount+time dedup signal in that case. */
+export function refBidx(userId: string, referenceNumber: string): string | null {
+  const normalized = normalizeReference(referenceNumber);
+  if (normalized.length < MIN_REF_LENGTH) return null;
+  const mac = hmac(sha256, keyBytes(), new TextEncoder().encode(`${userId}:ref:${normalized}`));
+  return Buffer.from(mac).toString("hex");
+}

@@ -6,6 +6,7 @@ vi.mock("@/lib/db", async () => (await import("./helpers/pglite")).createTestDb(
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { parseHealthStats, transactions, users } from "@/lib/db/schema";
+import { amountBidx, refBidx } from "@/lib/blind-index";
 import { loadCategorizerContext, ensureDefaultCategories } from "@/lib/categorize";
 import { loadContactContext } from "@/lib/contacts/match";
 import { generateKeypair, openWithKey } from "@/lib/e2e-crypto";
@@ -137,5 +138,65 @@ describe("ingestEmail — parse-health telemetry", () => {
     await ingest(hdfcUpiDebit("m1"));
     const [stat] = await db.select().from(parseHealthStats).where(eq(parseHealthStats.provider, "hdfc"));
     expect(stat.totalCount).toBe(1);
+  });
+});
+
+describe("ingestEmail — cross-source duplicate detection via reference number", () => {
+  it("flags a same-reference row as a duplicate even far outside the amount+time window", async () => {
+    // Simulate a row already ingested by another source (e.g. a statement
+    // imported weeks later) — same reference number, same amount, but well
+    // outside the 3-minute amount+time window this email would otherwise need.
+    const [existing] = await db
+      .insert(transactions)
+      .values({
+        userId,
+        source: "statement",
+        occurredAt: AT - 30 * 24 * 3600 * 1000,
+        amountPaise: 28500,
+        direction: "debit",
+        referenceNumber: "512345678901",
+      })
+      .returning();
+
+    const outcome = await ingest(hdfcUpiDebit("m1"));
+    if (outcome.status !== "inserted") throw new Error("unreachable");
+    expect(outcome.transaction.duplicateOfId).toBe(existing.id);
+  });
+
+  it("does not flag a different reference number as a duplicate", async () => {
+    await db.insert(transactions).values({
+      userId,
+      source: "statement",
+      occurredAt: AT - 30 * 24 * 3600 * 1000,
+      amountPaise: 28500,
+      direction: "debit",
+      referenceNumber: "999999999999",
+    });
+
+    const outcome = await ingest(hdfcUpiDebit("m1"));
+    if (outcome.status !== "inserted") throw new Error("unreachable");
+    expect(outcome.transaction.duplicateOfId).toBeNull();
+  });
+
+  it("matches a same-reference row by blind index for a keyed user (plaintext reference is null)", async () => {
+    const { publicKey } = generateKeypair();
+    const bidx = amountBidx(userId, "debit", 28500);
+    const [existing] = await db
+      .insert(transactions)
+      .values({
+        userId,
+        source: "statement",
+        occurredAt: AT - 30 * 24 * 3600 * 1000,
+        amountPaise: null,
+        amountBidx: bidx,
+        refBidx: refBidx(userId, "512345678901"),
+        direction: "debit",
+        encPayload: "v1.fake",
+      })
+      .returning();
+
+    const outcome = await ingest(hdfcUpiDebit("m1"), publicKey);
+    if (outcome.status !== "inserted") throw new Error("unreachable");
+    expect(outcome.transaction.duplicateOfId).toBe(existing.id);
   });
 });

@@ -11,6 +11,10 @@ const patchSchema = z.object({
   categoryId: z.string().nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
   deleted: z.boolean().optional(),
+  /** Escape hatch for a false-positive duplicate flag — only `null` is
+   *  accepted (clears duplicateOfId so the row counts in analytics/export
+   *  again); a user can't set someone else's id here. */
+  duplicateOfId: z.null().optional(),
   /** For keyed users only: the whole sensitive payload, re-sealed client-side
    *  after editing notes. The server never decrypts it — just stores it. */
   encPayload: z.string().optional(),
@@ -24,7 +28,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
-  const { categoryId, notes, deleted, encPayload } = parsed.data;
+  const { categoryId, notes, deleted, duplicateOfId, encPayload } = parsed.data;
 
   const owned = (
     await db
@@ -50,6 +54,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (categoryId !== undefined) update.categoryId = categoryId;
   if (notes !== undefined) update.notes = notes;
   if (deleted !== undefined) update.deletedAt = deleted ? Date.now() : null;
+  if (duplicateOfId !== undefined) update.duplicateOfId = duplicateOfId;
   if (encPayload !== undefined) update.encPayload = encPayload;
 
   await db.update(transactions).set(update).where(eq(transactions.id, id));

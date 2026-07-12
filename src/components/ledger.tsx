@@ -489,6 +489,9 @@ function LedgerInner() {
       }} onDeleteToggle={async () => {
         if (editing) await patch(editing.id, { deleted: !editing.deletedAt });
         setEditing(null);
+      }} onUnmarkDuplicate={async () => {
+        if (editing) await patch(editing.id, { duplicateOfId: null });
+        setEditing(null);
       }} />
     </div>
   );
@@ -508,12 +511,14 @@ function EditDialog({
   onClose,
   onSave,
   onDeleteToggle,
+  onUnmarkDuplicate,
 }: {
   txn: Txn | null;
   cats: CategoryRow[];
   onClose: () => void;
   onSave: (body: { categoryId: string | null; notes: string | null }) => Promise<void>;
   onDeleteToggle: () => Promise<void>;
+  onUnmarkDuplicate: () => Promise<void>;
 }) {
   const [categoryId, setCategoryId] = useState<string>(txn?.categoryId ?? "");
   const [notes, setNotes] = useState(txn?.notes ?? "");
@@ -537,6 +542,15 @@ function EditDialog({
             </p>
             {txn.referenceNumber && <p className="mt-0.5 text-[12px] text-muted">Ref {txn.referenceNumber}</p>}
             {txn.emailSubject && <p className="mt-1 line-clamp-2 text-[12px] text-muted">“{txn.emailSubject}”</p>}
+            {txn.duplicateOfId && (
+              <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[12px] text-amber-500">
+                <Copy className="h-3.5 w-3.5 shrink-0" />
+                Flagged as a possible duplicate — excluded from totals and export.
+                <button type="button" className="font-medium underline underline-offset-2" onClick={onUnmarkDuplicate}>
+                  Not a duplicate
+                </button>
+              </p>
+            )}
             <div className="mt-2 flex flex-col gap-0.5 border-t border-line pt-2">
               <p className={cn("text-[11px]", isLowConfidenceMerchant(txn) ? "text-amber-500" : "text-muted")}>
                 Merchant: {txn.merchantSource ? MERCHANT_SOURCE_LABELS[txn.merchantSource] ?? txn.merchantSource : "unknown"}

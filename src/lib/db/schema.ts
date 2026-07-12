@@ -138,6 +138,11 @@ export const transactions = pgTable(
      *  src/lib/blind-index.ts. Lets keyed-user dedup/matching run an
      *  equality query without a plaintext amount column. */
     amountBidx: text("amount_bidx"),
+    /** blind-index HMAC of (userId, normalizedReferenceNumber) — see
+     *  src/lib/blind-index.refBidx. Strong cross-source dedup signal (a UPI
+     *  RRN is the same regardless of which source saw it); null when no
+     *  reference was parsed or it was too short to trust. */
+    refBidx: text("ref_bidx"),
     deletedAt: epochMs("deleted_at"),
     createdAt: now(),
     updatedAt: epochMs("updated_at")
@@ -150,6 +155,7 @@ export const transactions = pgTable(
     index("txn_user_amount_idx").on(t.userId, t.amountPaise),
     index("txn_user_category_idx").on(t.userId, t.categoryId),
     index("txn_user_bidx_idx").on(t.userId, t.amountBidx),
+    index("txn_user_ref_bidx_idx").on(t.userId, t.refBidx),
   ],
 );
 

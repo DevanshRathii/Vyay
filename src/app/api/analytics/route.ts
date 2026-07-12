@@ -65,6 +65,7 @@ export async function GET(req: Request) {
         and(
           eq(transactions.userId, userId),
           isNull(transactions.deletedAt),
+          isNull(transactions.duplicateOfId),
           gte(transactions.occurredAt, Math.min(from, yearAgo)),
           lte(transactions.occurredAt, to),
         ),
@@ -88,6 +89,7 @@ export async function GET(req: Request) {
           and(
             eq(transactions.userId, userId),
             isNull(transactions.deletedAt),
+            isNull(transactions.duplicateOfId),
             gte(transactions.occurredAt, prevFrom),
             lte(transactions.occurredAt, from),
           ),
