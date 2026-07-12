@@ -234,6 +234,12 @@ export const shortcutEvents = pgTable(
     amountBidx: text("amount_bidx"),
     status: text("status").notNull().default("pending"), // pending | matched | resolved | dismissed
     matchedTransactionId: text("matched_transaction_id"),
+    /** The logged expense's actual time, from the Shortcut's `timestamp`
+     *  body field — distinct from createdAt (when the log HTTP request
+     *  landed). Null for older events logged before this field existed;
+     *  matching falls back to createdAt for those. Powers same-day,
+     *  same-amount disambiguation (src/lib/match.ts). */
+    occurredAt: epochMs("occurred_at"),
     createdAt: now(),
   },
   (t) => [index("shortcut_user_idx").on(t.userId, t.status)],

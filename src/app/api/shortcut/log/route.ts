@@ -6,7 +6,7 @@ import { apiTokens, categories, shortcutEvents, users } from "@/lib/db/schema";
 import { amountBidx } from "@/lib/blind-index";
 import { sha256 } from "@/lib/crypto";
 import { sealForUser } from "@/lib/e2e-crypto";
-import { applyEventToTransaction, findCandidates } from "@/lib/match";
+import { applyEventToTransaction, findCandidates, pickAutoMatch } from "@/lib/match";
 
 export const dynamic = "force-dynamic";
 
@@ -106,19 +106,24 @@ export async function POST(req: Request) {
         direction,
         categoryId: cat.id,
         categoryName: cat.name,
+        occurredAt: at,
         ...keyedValues,
       })
       .returning()
   )[0];
 
   const candidates = await findCandidates(userId, { amountPaise, direction, at });
+  // Sole candidate anywhere in the wide window is unambiguous; with several
+  // same-amount candidates, only auto-apply the one inside the tight
+  // 30-minute window — see pickAutoMatch.
+  const chosen = pickAutoMatch(candidates, at);
 
-  if (candidates.length === 1) {
-    await applyEventToTransaction(event, candidates[0].id, "matched");
+  if (chosen) {
+    await applyEventToTransaction(event, chosen.id, "matched");
     return NextResponse.json({
       status: "matched",
-      message: `Categorized ${cat.name}: ${candidates[0].merchant ?? "transaction"}.`,
-      transactionId: candidates[0].id,
+      message: `Categorized ${cat.name}: ${chosen.merchant ?? "transaction"}.`,
+      transactionId: chosen.id,
     });
   }
   if (candidates.length > 1) {

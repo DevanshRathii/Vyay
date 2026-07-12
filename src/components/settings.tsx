@@ -675,8 +675,18 @@ function ShortcutCard() {
               <p>URL: {origin}/api/shortcut/log</p>
               <p>Method: POST</p>
               <p>Headers: Authorization: Bearer vyay_…your token…</p>
-              <p>{'Body (JSON): { "amount": 249.5, "category": "Food", "notes": "lunch" }'}</p>
+              <p>
+                {'Body (JSON): { "amount": 249.5, "category": "Food", "notes": "lunch", "timestamp": '}
+                <span className="text-accent">Current Date</span>
+                {" }"}
+              </p>
             </div>
+            <p className="mt-1.5 text-[12px]">
+              Passing <span className="font-medium text-fg">timestamp</span> (the Shortcuts magic variable{" "}
+              <span className="font-medium text-fg">Current Date</span>, formatted as ISO 8601) matters if you might
+              log the same amount more than once in a day — Vyay uses it to pick the right transaction instead of
+              guessing.
+            </p>
           </li>
           <li>
             Optionally add <span className="font-medium text-fg">Show Result</span> to see the match status — Vyay

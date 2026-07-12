@@ -1,0 +1,1 @@
+ALTER TABLE "shortcut_events" ADD COLUMN "occurred_at" bigint;
