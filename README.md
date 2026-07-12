@@ -13,7 +13,7 @@ Vyay runs as a hosted app (Vercel + Supabase Postgres) with Google-only sign-in 
 - **Automatic ingestion** — parses transaction alerts from HDFC, ICICI, SBI, Axis, Kotak, IndusInd, Yes Bank, IDFC First, PNB, BoB, Canara, Union Bank, Federal Bank, AU, Google Pay, PhonePe, and Paytm. Extracts amount, direction, merchant, UPI VPA, reference number, card last-4, channel (UPI/Card/IMPS/NEFT/RTGS/ATM/…), and timestamp (IST-aware).
 - **Noise filtering** — OTPs, statements, bill reminders, future autopay notices, collect requests, failed transactions, and promotional "cashback offer" mail are rejected by a layered classifier. Real cashback credits still get through.
 - **Smart categorization** — 17 default categories, ~90 built-in merchant rules, plus your own "merchant contains X → category Y" rules that can retroactively apply to existing transactions.
-- **Ledger** — search, filter (category/channel/direction/date), sort, edit, soft-delete/restore. Near-duplicate alerts (same amount within 3 minutes, e.g. bank + UPI app both emailing) are flagged automatically.
+- **Ledger** — search, filter (category/channel/direction/date), sort, edit, soft-delete/restore. Duplicate alerts are flagged automatically — either a shared bank reference number (any time distance apart) or same amount/direction within 3 minutes (e.g. bank + UPI app both emailing) — and excluded from totals/export while staying visible with a "Not a duplicate" undo.
 - **Analytics** — spend by category, channel, merchant, day, and a 12-month trend.
 - **Excel export** — the classic ledger format: Date, Time, Payment Channel, Paid To/Paid By, Amount, Debit/Credit, Category, Notes.
 - **Apple Shortcut endpoint** — log `{amount, category, notes}` from your phone in two taps. Vyay pairs the log with the matching bank email: one candidate applies instantly, several go to a Matches screen, none yet waits and auto-resolves when the email lands.
@@ -103,6 +103,8 @@ Two ways to do both steps in one sitting, before they even sign up:
 
 Set `ADMIN_EMAIL` + `ADMIN_GMAIL_APP_PASSWORD` to get emailed (via Gmail SMTP, from and to that same address) the moment someone new signs up, instead of finding out secondhand — or `ADMIN_NOTIFY_WEBHOOK_URL` for a Slack/Discord/ntfy-shaped webhook instead (or in addition).
 
+`/admin` also shows two things for keeping parsing healthy across banks: a **parse health** table (per-provider extraction quality — % of transactions that got a merchant, UPI id, reference number, and category; operational counters only, no per-user content) and **donated parse samples** (users can "Report a bad parse" from the Ledger, which sends one raw email's text — reviewed and editable before submitting — for writing a fixture from). This is the acquisition path once zero-access encryption is on: the operator can no longer read a keyed user's stored raw emails, so a bad parser for some bank only gets fixed from what users choose to donate.
+
 ## Apple Shortcut
 
 Log expenses (especially cash context: *what* a UPI payment was for) from your phone:
@@ -118,11 +120,11 @@ The endpoint answers with one of:
 
 | status | meaning |
 | --- | --- |
-| `matched` | exactly one transaction (same amount + direction, ±72 h) — category and notes applied |
-| `pending` | several candidates — pick one on the **Matches** page |
-| `queued` | the email hasn't arrived yet — auto-resolves on the next sync |
+| `matched` | unambiguous match — category and notes applied. Either the sole candidate anywhere in the ±72h window, or (when several same-amount transactions exist) the one within 30 minutes of `timestamp` |
+| `pending` | still ambiguous — multiple same-amount candidates within 30 minutes of each other, or several candidates and no `timestamp` to disambiguate with. Pick one on the **Matches** page |
+| `queued` | no matching transaction yet — auto-resolves the same way when the email arrives |
 
-Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (ISO 8601, for logging past expenses).
+Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (ISO 8601). **Pass `timestamp`** (the Shortcuts magic variable `Current Date`) if you might log the same amount more than once in a day — without it, two same-amount purchases can't be told apart and both stay pending for manual resolution.
 
 ## Environment variables
 
