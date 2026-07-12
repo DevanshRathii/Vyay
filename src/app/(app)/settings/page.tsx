@@ -1,13 +1,18 @@
+import { auth } from "@/auth";
 import { PageHeader } from "@/components/nav";
-import { SettingsPanels } from "@/components/settings";
+import { AccountCard, SettingsPanels } from "@/components/settings";
 
 export const metadata = { title: "Settings" };
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const session = await auth();
   return (
     <>
       <PageHeader title="Settings" subtitle="Gmail, tokens, export, and the Apple Shortcut" />
-      <SettingsPanels />
+      <div className="flex flex-col gap-4">
+        <SettingsPanels />
+        <AccountCard name={session?.user?.name ?? null} email={session?.user?.email ?? null} />
+      </div>
     </>
   );
 }

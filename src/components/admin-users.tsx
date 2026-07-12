@@ -2,7 +2,7 @@
 
 import { Check, Copy, ExternalLink, Loader2, MailCheck, Plus, ShieldOff, X } from "lucide-react";
 import { useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { Badge, Button, Card, CardHeader, Input } from "@/components/ui";
 
 interface AdminUserRow {
@@ -75,18 +75,27 @@ function CopyEmailButton({ email }: { email: string }) {
 
 export function PreapprovedPanel() {
   const { data, mutate } = useSWR<{ rows: PreapprovedRow[] }>("/api/admin/preapproved");
+  const { mutate: mutateGlobal } = useSWRConfig();
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function add() {
     if (!email.trim()) return;
     setSubmitting(true);
-    await fetch("/api/admin/preapproved", {
+    setNotice(null);
+    const res = await fetch("/api/admin/preapproved", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: email.trim() }),
     });
+    const body = await res.json().catch(() => ({}));
+    if (body.grantedExistingUser) {
+      setNotice(`${email.trim()} already has an account — Gmail access was granted on it directly.`);
+      // The grant landed on the users list, not this one — refresh that panel.
+      mutateGlobal("/api/admin/users");
+    }
     setEmail("");
     setSubmitting(false);
     mutate();
@@ -130,6 +139,7 @@ export function PreapprovedPanel() {
             <Plus className="h-4 w-4" /> Add
           </Button>
         </div>
+        {notice && <p className="rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px] text-muted">{notice}</p>}
         {data && data.rows.length > 0 && (
           <div className="flex flex-col">
             {data.rows.map((r) => (
