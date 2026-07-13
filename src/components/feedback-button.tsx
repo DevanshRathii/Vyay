@@ -10,25 +10,31 @@ export function UrgentFeedbackButton() {
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function close() {
     setOpen(false);
     setTimeout(() => {
       setMessage("");
       setSent(false);
+      setError(null);
     }, 200);
   }
 
   async function submit() {
     if (!message.trim()) return;
     setSubmitting(true);
+    setError(null);
     try {
-      await fetch("/api/feedback", {
+      const res = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: message.trim() }),
       });
+      if (!res.ok) throw new Error();
       setSent(true);
+    } catch {
+      setError("Couldn't send that — check your connection and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -72,6 +78,7 @@ export function UrgentFeedbackButton() {
               rows={4}
               className="w-full resize-none rounded-xl border border-line bg-card px-3.5 py-2.5 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none"
             />
+            {error && <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[12px] text-negative">{error}</p>}
             <Button onClick={submit} disabled={submitting || !message.trim()}>
               {submitting ? "Sending…" : "Send"}
             </Button>

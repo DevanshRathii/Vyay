@@ -302,6 +302,88 @@ export function Dialog({
   );
 }
 
+// ── Confirm button ──────────────────────────────────────────────────────────
+// Every destructive/irreversible action (delete, revoke, disconnect, dismiss)
+// should go through this instead of a bare Button + inline fetch — an audit
+// found the same three bugs repeated independently at every call site: no
+// confirmation step, no busy/disabled state during the request (so a slow
+// network lets a double-click fire the request twice), and no error surfaced
+// when the request fails (it just silently reverts, looking like it worked).
+// This component owns all three so a new destructive action can't forget them.
+
+export function ConfirmButton({
+  onConfirm,
+  confirmTitle,
+  confirmMessage,
+  confirmLabel = "Delete",
+  children,
+  variant = "danger",
+  size,
+  className,
+  disabled,
+  ...rest
+}: {
+  onConfirm: () => Promise<void>;
+  confirmTitle: string;
+  confirmMessage: React.ReactNode;
+  confirmLabel?: string;
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> &
+  VariantProps<typeof buttonVariants>) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function close() {
+    if (busy) return; // don't let Escape/backdrop abandon an in-flight request
+    setOpen(false);
+    setError(null);
+  }
+
+  async function confirm() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirm();
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong — try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant={variant}
+        size={size}
+        className={className}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        {...rest}
+      >
+        {children}
+      </Button>
+      <Dialog open={open} onClose={close} title={confirmTitle}>
+        <div className="flex flex-col gap-3 text-[13px] text-muted">
+          <div>{confirmMessage}</div>
+          {error && <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[12px] text-negative">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="secondary" size="sm" onClick={close} disabled={busy}>
+              Cancel
+            </Button>
+            <Button type="button" variant="danger" size="sm" onClick={confirm} disabled={busy}>
+              {busy ? <Spinner className="h-3.5 w-3.5 border-negative/30 border-t-negative" /> : null}
+              {confirmLabel}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </>
+  );
+}
+
 // ── Empty state ─────────────────────────────────────────────────────────────
 
 export function Empty({

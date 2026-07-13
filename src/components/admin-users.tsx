@@ -3,7 +3,7 @@
 import { Check, Copy, ExternalLink, Loader2, MailCheck, Plus, ShieldOff, X } from "lucide-react";
 import { useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { Badge, Button, Card, CardHeader, Input } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, ConfirmButton, Input } from "@/components/ui";
 
 interface AdminUserRow {
   id: string;
@@ -91,6 +91,11 @@ export function PreapprovedPanel() {
       body: JSON.stringify({ email: email.trim() }),
     });
     const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setNotice(body.error ?? "Couldn't add that email — try again.");
+      setSubmitting(false);
+      return;
+    }
     if (body.grantedExistingUser) {
       setNotice(`${email.trim()} already has an account — Gmail access was granted on it directly.`);
       // The grant landed on the users list, not this one — refresh that panel.
@@ -103,9 +108,10 @@ export function PreapprovedPanel() {
 
   async function remove(id: string) {
     setRemoving(id);
-    await fetch(`/api/admin/preapproved/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/admin/preapproved/${id}`, { method: "DELETE" });
     setRemoving(null);
     mutate();
+    if (!res.ok) setNotice("Couldn't remove that email — try again.");
   }
 
   return (
@@ -167,16 +173,19 @@ export function PreapprovedPanel() {
 export function AdminUsersPanel() {
   const { data, mutate } = useSWR<{ rows: AdminUserRow[] }>("/api/admin/users");
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function setGranted(id: string, granted: boolean) {
     setBusy(id);
-    await fetch(`/api/admin/users/${id}`, {
+    setError(null);
+    const res = await fetch(`/api/admin/users/${id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gmailAccessGranted: granted }),
     });
     setBusy(null);
     mutate();
+    if (!res.ok) setError("Couldn't update Gmail access — try again.");
   }
 
   return (
@@ -200,6 +209,7 @@ export function AdminUsersPanel() {
           — there&apos;s no API for that, so add them there too, manually, or their Gmail connection will fail even
           after you grant it here.
         </p>
+        {error && <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[12px] text-negative">{error}</p>}
         {!data ? (
           <p className="text-[13px] text-muted">Loading…</p>
         ) : data.rows.length === 0 ? (
@@ -218,9 +228,16 @@ export function AdminUsersPanel() {
               </div>
               <CopyEmailButton email={u.email} />
               {u.gmailAccessGranted ? (
-                <Button size="sm" variant="danger" disabled={busy === u.id} onClick={() => setGranted(u.id, false)}>
+                <ConfirmButton
+                  size="sm"
+                  disabled={busy === u.id}
+                  confirmTitle="Revoke Gmail access?"
+                  confirmMessage={`${u.name ?? u.email} will immediately lose access to connect or sync Gmail.`}
+                  confirmLabel="Revoke"
+                  onConfirm={() => setGranted(u.id, false)}
+                >
                   <ShieldOff className="h-3.5 w-3.5" /> Revoke
-                </Button>
+                </ConfirmButton>
               ) : (
                 <Button size="sm" disabled={busy === u.id} onClick={() => setGranted(u.id, true)}>
                   <MailCheck className="h-3.5 w-3.5" /> Grant Gmail access

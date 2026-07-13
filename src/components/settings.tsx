@@ -21,7 +21,7 @@ import { signOut } from "next-auth/react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { ThemeToggle } from "@/components/nav";
-import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, Input, Label, Spinner } from "@/components/ui";
+import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, ConfirmButton, Input, Label, Spinner } from "@/components/ui";
 import { generateKeypair, makeKeyCheck } from "@/lib/e2e-crypto";
 import { useE2EOptional } from "@/components/e2e-provider";
 import { offerToSaveCredential } from "@/lib/key-store";
@@ -199,9 +199,9 @@ function GmailCard() {
   }, [data]);
 
   async function disconnect() {
-    if (!confirm("Disconnect Gmail? Your imported transactions are kept.")) return;
-    await fetch("/api/gmail/disconnect", { method: "POST" });
+    const res = await fetch("/api/gmail/disconnect", { method: "POST" });
     mutate();
+    if (!res.ok) throw new Error("Couldn't disconnect Gmail — try again.");
   }
 
   async function reparse() {
@@ -317,9 +317,15 @@ function GmailCard() {
                 <Button size="sm" variant="secondary" disabled={syncing} onClick={() => syncNow(false)}>
                   <RefreshCw className={syncing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Sync now
                 </Button>
-                <Button size="sm" variant="danger" onClick={disconnect}>
+                <ConfirmButton
+                  size="sm"
+                  confirmTitle="Disconnect Gmail?"
+                  confirmMessage="Your imported transactions are kept — you can reconnect and re-sync at any time."
+                  confirmLabel="Disconnect"
+                  onConfirm={disconnect}
+                >
                   <Unplug className="h-3.5 w-3.5" /> Disconnect
-                </Button>
+                </ConfirmButton>
                 <ActionMenu>
                   <ActionMenuItem disabled={syncing} onClick={() => syncNow(true)}>
                     <RefreshCw className="h-3.5 w-3.5" /> Full resync
@@ -383,24 +389,37 @@ function TokensCard() {
   const [label, setLabel] = useState("");
   const [fresh, setFresh] = useState<{ token: string; label: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   async function create() {
-    const res = await fetch("/api/tokens", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(label.trim() ? { label: label.trim() } : {}),
-    });
-    const body = await res.json();
-    if (res.ok) {
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch("/api/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(label.trim() ? { label: label.trim() } : {}),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCreateError(body.error ?? "Couldn't create that token — try again.");
+        return;
+      }
       setFresh({ token: body.token, label: body.label });
       setLabel("");
       mutate();
+    } catch {
+      setCreateError("Couldn't reach the server — check your connection and try again.");
+    } finally {
+      setCreating(false);
     }
   }
 
   async function remove(id: string) {
-    await fetch(`/api/tokens?id=${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/tokens?id=${id}`, { method: "DELETE" });
     mutate();
+    if (!res.ok) throw new Error("Couldn't revoke that token — try again.");
   }
 
   async function copy() {
@@ -432,18 +451,28 @@ function TokensCard() {
         )}
         <div className="flex gap-2">
           <Input placeholder="Label (e.g. iPhone Shortcut)" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={60} />
-          <Button onClick={create} className="shrink-0">
-            <Plus className="h-4 w-4" /> Create
+          <Button onClick={create} disabled={creating} className="shrink-0">
+            {creating ? <Spinner className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            Create
           </Button>
         </div>
+        {createError && <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[12px] text-negative">{createError}</p>}
         {(data?.rows ?? []).map((t) => (
           <div key={t.id} className="flex items-center gap-2 border-b border-line py-2 text-[13px] last:border-0">
             <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted" />
             <span className="min-w-0 flex-1 truncate font-medium">{t.label}</span>
             <span className="shrink-0 text-[12px] text-muted">last used {fmt(t.lastUsedAt)}</span>
-            <Button variant="danger" size="icon" className="h-8 w-8 shrink-0" onClick={() => remove(t.id)} aria-label="Revoke token">
+            <ConfirmButton
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              aria-label="Revoke token"
+              confirmTitle="Revoke this token?"
+              confirmMessage={`Any Apple Shortcut using "${t.label}" will stop working immediately.`}
+              confirmLabel="Revoke"
+              onConfirm={() => remove(t.id)}
+            >
               <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            </ConfirmButton>
           </div>
         ))}
       </div>

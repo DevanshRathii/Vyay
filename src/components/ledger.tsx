@@ -16,7 +16,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import useSWR from "swr";
-import { Badge, Button, Card, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
+import { Badge, Button, Card, ConfirmButton, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
 import { useE2EOptional } from "@/components/e2e-provider";
 import { matchesLedgerFilters } from "@/lib/transactions";
 import { useTransactions, type DecryptedTxn } from "@/lib/use-transactions";
@@ -182,12 +182,13 @@ function LedgerInner() {
       }
       // else: a dual-read plaintext straggler row — PATCH notes as plaintext, same as non-keyed.
     }
-    await fetch(`/api/transactions/${id}`, {
+    const res = await fetch(`/api/transactions/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patchBody),
     });
     mutate();
+    if (!res.ok) throw new Error("Couldn't save that change — try again.");
   }
 
   function resetFilters(fn: () => void) {
@@ -381,9 +382,16 @@ function LedgerInner() {
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
                     ) : (
-                      <Button variant="danger" size="icon" className="h-8 w-8" onClick={() => patch(t.id, { deleted: true })} aria-label="Delete">
+                      <ConfirmButton
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label="Delete"
+                        confirmTitle="Delete transaction?"
+                        confirmMessage="It moves to the Deleted filter and can be restored later — this doesn't remove it permanently."
+                        onConfirm={() => patch(t.id, { deleted: true })}
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      </ConfirmButton>
                     )}
                   </div>
                 </td>
@@ -574,17 +582,20 @@ function EditDialog({
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Add a note…" maxLength={500} />
           </div>
           <div className="flex items-center justify-between pt-1">
-            <Button variant="danger" size="sm" onClick={onDeleteToggle}>
-              {txn.deletedAt ? (
-                <>
-                  <RotateCcw className="h-3.5 w-3.5" /> Restore
-                </>
-              ) : (
-                <>
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </>
-              )}
-            </Button>
+            {txn.deletedAt ? (
+              <Button variant="danger" size="sm" onClick={onDeleteToggle}>
+                <RotateCcw className="h-3.5 w-3.5" /> Restore
+              </Button>
+            ) : (
+              <ConfirmButton
+                size="sm"
+                confirmTitle="Delete transaction?"
+                confirmMessage="It moves to the Deleted filter and can be restored later — this doesn't remove it permanently."
+                onConfirm={onDeleteToggle}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Delete
+              </ConfirmButton>
+            )}
             <Button onClick={() => onSave({ categoryId: categoryId || null, notes: notes || null })}>Save</Button>
           </div>
         </div>

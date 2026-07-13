@@ -4,7 +4,7 @@ import { Pencil, Plus, Tags, Trash2, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
-import { Badge, Button, Card, CardHeader, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, ConfirmButton, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
 
 interface CategoryRow {
   id: string;
@@ -62,10 +62,11 @@ export function CategoryManager() {
   }
 
   async function deleteCategory(id: string) {
-    await fetch(`/api/categories/${id}`, { method: "DELETE" });
-    setEditing(null);
+    const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
     mutateCats();
     mutateRules();
+    if (!res.ok) throw new Error("Couldn't delete that category — try again.");
+    setEditing(null);
   }
 
   async function createRule(pattern: string, categoryId: string, applyToExisting: boolean) {
@@ -85,8 +86,9 @@ export function CategoryManager() {
   }
 
   async function deleteRule(id: string) {
-    await fetch(`/api/rules/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/rules/${id}`, { method: "DELETE" });
     mutateRules();
+    if (!res.ok) throw new Error("Couldn't delete that rule — try again.");
   }
 
   if (!cats) {
@@ -172,9 +174,21 @@ export function CategoryManager() {
                 <span className="text-muted">→</span>
                 <Badge color={r.categoryColor}>{r.categoryName}</Badge>
               </div>
-              <Button variant="danger" size="icon" className="h-8 w-8" onClick={() => deleteRule(r.id)} aria-label="Delete rule">
+              <ConfirmButton
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Delete rule"
+                confirmTitle="Delete this rule?"
+                confirmMessage={
+                  <>
+                    Future emails matching <code className="rounded bg-card-2 px-1 font-mono text-[12px]">{r.pattern}</code> will
+                    no longer auto-categorize into {r.categoryName}.
+                  </>
+                }
+                onConfirm={() => deleteRule(r.id)}
+              >
                 <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              </ConfirmButton>
             </div>
           ))}
           {rules && rules.rows.length === 0 && (
@@ -222,7 +236,7 @@ function CategoryDialog({
   initialColor?: string;
   onClose: () => void;
   onSubmit: (name: string, color: string) => void;
-  onDelete?: () => void;
+  onDelete?: () => Promise<void>;
   deleteHint?: string;
 }) {
   const [name, setName] = useState("");
@@ -259,9 +273,18 @@ function CategoryDialog({
         <div className="flex items-center justify-between pt-1">
           {onDelete ? (
             <div className="flex flex-col">
-              <Button variant="danger" size="sm" onClick={onDelete}>
+              <ConfirmButton
+                size="sm"
+                confirmTitle="Delete this category?"
+                confirmMessage={
+                  deleteHint
+                    ? `${deleteHint} This can't be undone.`
+                    : "This can't be undone."
+                }
+                onConfirm={onDelete}
+              >
                 <Trash2 className="h-3.5 w-3.5" /> Delete
-              </Button>
+              </ConfirmButton>
               {deleteHint && <span className="mt-1 max-w-[180px] text-[11px] text-muted">{deleteHint}</span>}
             </div>
           ) : (

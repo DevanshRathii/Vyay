@@ -3,7 +3,7 @@
 import { Phone, Trash2, Upload, Users } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { Button, Card, CardHeader, Dialog, Empty, Spinner } from "@/components/ui";
+import { Button, Card, CardHeader, ConfirmButton, Dialog, Empty, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 interface ContactRow {
@@ -79,9 +79,10 @@ export function ContactsManager() {
   }
 
   async function deleteContact(id: string) {
-    await fetch(`/api/contacts/${id}`, { method: "DELETE" });
-    setSelected(null);
+    const res = await fetch(`/api/contacts/${id}`, { method: "DELETE" });
     mutate();
+    if (!res.ok) throw new Error("Couldn't delete that contact — try again.");
+    setSelected(null);
   }
 
   function jumpTo(letter: string) {
@@ -208,9 +209,14 @@ export function ContactsManager() {
               whatever name the bank email itself included.
             </p>
             <div className="flex justify-end">
-              <Button variant="danger" size="sm" onClick={() => deleteContact(selected.id)}>
+              <ConfirmButton
+                size="sm"
+                confirmTitle="Delete this contact?"
+                confirmMessage="Transactions already matched to this contact keep their current merchant name — only future matching is affected."
+                onConfirm={() => deleteContact(selected.id)}
+              >
                 <Trash2 className="h-3.5 w-3.5" /> Delete contact
-              </Button>
+              </ConfirmButton>
             </div>
           </div>
         )}
