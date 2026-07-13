@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, CardHeader, ConfirmButton, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 interface CategoryRow {
   id: string;
@@ -21,9 +22,13 @@ interface RuleRow {
   categoryColor: string;
 }
 
+// A custom, evenly-hued palette at consistent saturation/lightness — the
+// previous set was literally iOS's system color tuple, which read as
+// borrowed rather than Vyay's own. Neutral gray stays last for "nothing
+// distinctive" categories.
 const PALETTE = [
-  "#0071e3", "#1f9d55", "#e02d3c", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#8e8e93",
+  "#e5484d", "#f2994a", "#d4a017", "#4caf6d", "#14b8a6",
+  "#2f8fdb", "#6366f1", "#a855f7", "#ec4899", "#8e8e93",
 ];
 
 export function CategoryManager() {
@@ -129,7 +134,10 @@ export function CategoryManager() {
               title={`View ${c.name} transactions in the Ledger`}
             >
               <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium">
-                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.color }} />
+                <span
+                  className="category-dot h-3 w-3 shrink-0 rounded-full"
+                  style={{ background: c.color, "--dot-color": c.color } as React.CSSProperties}
+                />
                 <span className="truncate">{c.name}</span>
               </span>
               <span className="flex shrink-0 items-center gap-2">
@@ -262,7 +270,10 @@ function CategoryDialog({
             {PALETTE.map((c) => (
               <button
                 key={c}
-                className="h-8 w-8 rounded-full border-2"
+                className={cn(
+                  "h-8 w-8 scale-100 rounded-full border-2 transition-transform duration-150",
+                  color === c && "scale-110 animate-ring-pulse",
+                )}
                 style={{ background: c, borderColor: color === c ? "var(--fg)" : "transparent" }}
                 onClick={() => setColor(c)}
                 aria-label={`Color ${c}`}
