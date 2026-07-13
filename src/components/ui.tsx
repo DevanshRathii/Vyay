@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 // ── Button ──────────────────────────────────────────────────────────────────
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap select-none touch-manipulation",
+  "inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-[background-color,opacity,transform] duration-100 active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100 whitespace-nowrap select-none touch-manipulation",
   {
     variants: {
       variant: {
@@ -79,9 +79,10 @@ export function ActionMenu({ children, align = "end" }: { children: React.ReactN
           role="menu"
           onClick={() => setOpen(false)}
           className={cn(
-            "absolute top-full z-20 mt-1 flex min-w-[10.5rem] flex-col gap-0.5 rounded-xl border border-line bg-card p-1.5 shadow-lg",
+            "animate-dialog-panel-in absolute top-full z-20 mt-1 flex min-w-[10.5rem] flex-col gap-0.5 rounded-xl border border-line/60 bg-card p-1.5",
             align === "end" ? "right-0" : "left-0",
           )}
+          style={{ boxShadow: "var(--shadow-floating)" }}
         >
           {children}
         </div>
@@ -146,10 +147,22 @@ export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLab
 
 // ── Card ────────────────────────────────────────────────────────────────────
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+const CARD_ELEVATION_BORDER = {
+  resting: "border-line",
+  raised: "border-line/60",
+  floating: "border-line/40",
+} as const;
+
+export function Card({
+  className,
+  elevation = "resting",
+  style,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { elevation?: "resting" | "raised" | "floating" }) {
   return (
     <div
-      className={cn("rounded-2xl border border-line bg-card shadow-[0_1px_2px_rgba(0,0,0,0.03)]", className)}
+      className={cn("card-surface rounded-2xl border bg-card", CARD_ELEVATION_BORDER[elevation], className)}
+      style={{ boxShadow: `var(--shadow-${elevation})`, ...style }}
       {...props}
     />
   );
@@ -194,7 +207,12 @@ export function Badge({
         className,
       )}
     >
-      {color && <span className="h-2 w-2 rounded-full" style={{ background: color }} />}
+      {color && (
+        <span
+          className="category-dot h-2 w-2 rounded-full"
+          style={{ background: color, "--dot-color": color } as React.CSSProperties}
+        />
+      )}
       {children}
     </span>
   );
@@ -278,11 +296,12 @@ export function Dialog({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-md" onClick={onClose} />
       <div
         ref={panelRef}
         className={cn(
-          "relative z-10 w-full rounded-t-2xl bg-card p-5 shadow-2xl sm:rounded-2xl",
+          "animate-dialog-panel-in relative z-10 w-full rounded-t-2xl bg-card p-5 shadow-2xl sm:rounded-2xl",
+          "dark:bg-card/95 dark:backdrop-blur-xl",
           "pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-5",
           wide ? "sm:max-w-2xl" : "sm:max-w-md",
           "max-h-[85dvh] overflow-y-auto",
@@ -399,10 +418,28 @@ export function Empty({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
-      {icon && <div className="text-muted">{icon}</div>}
+      {icon && <div className="animate-float-bob text-muted">{icon}</div>}
       <p className="text-sm font-medium">{title}</p>
       {hint && <p className="max-w-sm text-[13px] text-muted">{hint}</p>}
       {children}
     </div>
+  );
+}
+
+// ── Skeleton ────────────────────────────────────────────────────────────────
+// Content-shaped loading placeholder — reads as "the real thing is about to
+// appear" rather than a generic Spinner's "something is happening, unclear
+// what." Use for initial data loads on content-heavy screens (tables, stat
+// grids); keep Spinner for short-lived in-flight actions (button presses).
+
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "animate-shimmer rounded-lg bg-[linear-gradient(90deg,var(--card-2)_25%,var(--line)_50%,var(--card-2)_75%)]",
+        className,
+      )}
+      aria-hidden
+    />
   );
 }

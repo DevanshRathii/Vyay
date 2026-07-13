@@ -295,10 +295,16 @@ function GmailCard() {
                 {syncing && data.syncProgress && data.syncProgress.total > 0 && (
                   <span className="mt-1.5 block h-1 w-40 max-w-full overflow-hidden rounded-full bg-card-2">
                     <span
-                      className="block h-full rounded-full bg-accent transition-[width]"
+                      className="block h-full rounded-full bg-accent transition-[width] duration-[400ms] ease-out"
                       style={{ width: `${Math.min(100, (data.syncProgress.processed / data.syncProgress.total) * 100)}%` }}
                     />
                   </span>
+                )}
+                {syncing && (!data.syncProgress || data.syncProgress.total === 0) && (
+                  <span
+                    className="animate-shimmer mt-1.5 block h-1 w-40 max-w-full rounded-full"
+                    style={{ backgroundImage: "linear-gradient(90deg, var(--card-2) 25%, var(--accent) 50%, var(--card-2) 75%)" }}
+                  />
                 )}
                 <p className="mt-1 text-[11px] text-muted">
                   {data.selectedProviders === null ? (

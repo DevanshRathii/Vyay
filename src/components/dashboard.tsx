@@ -14,9 +14,10 @@ import {
   YAxis,
 } from "recharts";
 import useSWR from "swr";
-import { Button, Card, CardHeader, Empty, Select, Spinner } from "@/components/ui";
+import { Button, Card, CardHeader, Empty, Select, Skeleton } from "@/components/ui";
 import { useE2EOptional } from "@/components/e2e-provider";
 import { computeAnalytics, type AnalyticsRow, type CategoryLite } from "@/lib/analytics-core";
+import { useCountUp } from "@/lib/use-count-up";
 import { useTransactions } from "@/lib/use-transactions";
 import { cn, formatINR } from "@/lib/utils";
 
@@ -104,22 +105,26 @@ function DeltaBadge({ current, prior, invert }: { current: number; prior: number
 
 function StatCard({
   label,
-  value,
-  compactValue,
+  amount,
+  format,
+  compactFormat,
   icon,
   tone,
   delta,
 }: {
   label: string;
-  value: string;
+  /** Raw numeric value (paise, or a plain count) — animated with a count-up tween. */
+  amount: number;
+  format: (n: number) => string;
   /** Shorter rendering shown below the `sm` breakpoint, where a 2-col grid leaves little room. */
-  compactValue?: string;
+  compactFormat?: (n: number) => string;
   icon: React.ReactNode;
   tone?: "positive" | "negative";
   delta?: React.ReactNode;
 }) {
+  const animated = useCountUp(amount);
   return (
-    <Card className="flex items-center gap-3.5 p-4">
+    <Card elevation="raised" className="flex items-center gap-3.5 p-4">
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-card-2 text-muted">
         {icon}
       </span>
@@ -129,18 +134,18 @@ function StatCard({
           {delta}
         </p>
         <p
-          className={
-            "truncate text-lg font-semibold tracking-tight " +
-            (tone === "positive" ? "text-positive" : tone === "negative" ? "text-negative" : "")
-          }
+          className={cn(
+            "truncate text-lg font-semibold tabular-nums tracking-tight",
+            tone === "positive" ? "text-positive" : tone === "negative" ? "text-negative" : "",
+          )}
         >
-          {compactValue ? (
+          {compactFormat ? (
             <>
-              <span className="sm:hidden">{compactValue}</span>
-              <span className="hidden sm:inline">{value}</span>
+              <span className="sm:hidden">{compactFormat(animated)}</span>
+              <span className="hidden sm:inline">{format(animated)}</span>
             </>
           ) : (
-            value
+            format(animated)
           )}
         </p>
       </div>
@@ -242,8 +247,26 @@ export function Dashboard() {
 
   if ((isLoading && !data) || !data) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <Spinner className="h-6 w-6" />
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} elevation="raised" className="flex items-center gap-3.5 p-4">
+              <Skeleton className="h-10 w-10 shrink-0 rounded-xl" />
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-5 w-20" />
+              </div>
+            </Card>
+          ))}
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="h-72 p-4">
+            <Skeleton className="h-full w-full rounded-xl" />
+          </Card>
+          <Card className="h-72 p-4">
+            <Skeleton className="h-full w-full rounded-xl" />
+          </Card>
+        </div>
       </div>
     );
   }
@@ -311,28 +334,36 @@ export function Dashboard() {
       <div data-tour="overview-stats" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label="Spent"
-          value={formatINR(totals.debit)}
-          compactValue={formatINR(totals.debit, { compact: true })}
+          amount={totals.debit}
+          format={formatINR}
+          compactFormat={(n) => formatINR(n, { compact: true })}
           tone="negative"
           icon={<ArrowUpRight className="h-5 w-5" />}
           delta={previous && <DeltaBadge current={totals.debit} prior={previous.debit} invert />}
         />
         <StatCard
           label="Received"
-          value={formatINR(totals.credit)}
-          compactValue={formatINR(totals.credit, { compact: true })}
+          amount={totals.credit}
+          format={formatINR}
+          compactFormat={(n) => formatINR(n, { compact: true })}
           tone="positive"
           icon={<ArrowDownLeft className="h-5 w-5" />}
           delta={previous && <DeltaBadge current={totals.credit} prior={previous.credit} />}
         />
         <StatCard
           label="Net"
-          value={formatINR(totals.net)}
-          compactValue={formatINR(totals.net, { compact: true })}
+          amount={totals.net}
+          format={formatINR}
+          compactFormat={(n) => formatINR(n, { compact: true })}
           icon={<ReceiptText className="h-5 w-5" />}
           delta={previous && <DeltaBadge current={totals.net} prior={previous.credit - previous.debit} />}
         />
-        <StatCard label="Transactions" value={String(totals.count)} icon={<Inbox className="h-5 w-5" />} />
+        <StatCard
+          label="Transactions"
+          amount={totals.count}
+          format={(n) => String(Math.round(n))}
+          icon={<Inbox className="h-5 w-5" />}
+        />
       </div>
 
       {empty ? (
@@ -431,7 +462,10 @@ export function Dashboard() {
                   >
                     <div className="mb-1 flex items-baseline justify-between text-[13px]">
                       <span className="flex items-center gap-2 font-medium">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} />
+                        <span
+                          className="category-dot h-2.5 w-2.5 rounded-full"
+                          style={{ background: c.color, "--dot-color": c.color } as React.CSSProperties}
+                        />
                         {c.name}
                       </span>
                       <span className="tabular-nums text-muted">{formatINR(c.total)}</span>
