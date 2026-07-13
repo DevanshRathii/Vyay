@@ -53,3 +53,42 @@ async function notifyWebhook(subject: string, body: string): Promise<void> {
 export async function notifyAdmin(subject: string, body: string): Promise<void> {
   await Promise.allSettled([notifyEmail(subject, body), notifyWebhook(subject, body)]);
 }
+
+/** True when Gmail SMTP is actually configured — the newsletter admin route
+ *  uses this to fail fast with a clear error instead of silently no-op'ing
+ *  the way the best-effort notifyAdmin() above deliberately does. */
+export function isEmailConfigured(): boolean {
+  return getTransporter() !== null;
+}
+
+/**
+ * One outbound email per recipient (never one email with everyone in `to`/
+ * `bcc` — a real send, not a bulk blast, and recipients never see each
+ * other's addresses). Used by the admin "Send newsletter" feature
+ * (src/app/api/admin/newsletter/route.ts). Sent from ADMIN_EMAIL via the
+ * same SMTP transporter notifyAdmin() uses. Returns per-recipient results
+ * rather than throwing on the first failure, so one bad address doesn't
+ * abort the whole batch.
+ */
+export async function sendBulkEmail(
+  recipients: string[],
+  subject: string,
+  html: string,
+  text: string,
+): Promise<{ sent: string[]; failed: Array<{ email: string; error: string }> }> {
+  const t = getTransporter();
+  const from = process.env.ADMIN_EMAIL;
+  if (!t || !from) throw new Error("Gmail SMTP isn't configured (ADMIN_EMAIL / ADMIN_GMAIL_APP_PASSWORD).");
+
+  const sent: string[] = [];
+  const failed: Array<{ email: string; error: string }> = [];
+  for (const email of recipients) {
+    try {
+      await t.sendMail({ from, to: email, subject, html, text });
+      sent.push(email);
+    } catch (err) {
+      failed.push({ email, error: err instanceof Error ? err.message : "send failed" });
+    }
+  }
+  return { sent, failed };
+}
