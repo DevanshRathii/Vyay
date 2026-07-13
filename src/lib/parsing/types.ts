@@ -37,6 +37,11 @@ export interface ParsedTransaction {
   cardLast4?: string;
   /** ms epoch — parsed from the email body when possible, else internalDate. */
   occurredAt: number;
+  /** True only when an actual time-of-day was read from the message body —
+   *  false when occurredAt falls back to arrival time or a bare date with no
+   *  clock time. Cross-source dedup widens its matching window when either
+   *  side of a comparison isn't precise (see src/lib/ingest.ts). */
+  occurredAtPrecise: boolean;
   /** 0–1, how confident the parser is in this extraction. */
   confidence: number;
   /** Provider id that matched, or "generic". */

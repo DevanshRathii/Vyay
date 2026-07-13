@@ -13,7 +13,14 @@ const HARD_NEGATIVE: Array<[RegExp, string]> = [
   [/e-?statement|statement\s+(?:is|for|of|has been|generated|ready|attached)|combined statement/i, "statement"],
   [/payment\s+(?:is\s+)?due|due\s+(?:date|on|by)|min(?:imum)?\s+(?:amount\s+)?due|bill\s+(?:is\s+)?(?:generated|ready)/i, "reminder"],
   [/\breminder\b|overdue|last\s+date\s+to\s+pay/i, "reminder"],
-  [/will\s+be\s+(?:debited|charged|deducted)|upcoming\s+(?:payment|debit|charge)|scheduled\s+(?:payment|debit)/i, "future-debit"],
+  [/will\s+be\s+(?:debited|charged|deducted|processed)|is\s+due\s+on|upcoming\s+(?:payment|debit|charge)|scheduled\s+(?:payment|debit)/i, "future-debit"],
+  // RBI mandates a pre-debit SMS/email at least 24h before every e-mandate/
+  // autopay collection, across every bank — the shape is standardized by
+  // regulation even though exact wording varies ("will be deducted on",
+  // SBI's "is due on ... and will be processed"), so this is a genuine
+  // negative class, not a per-bank guess.
+  [/reward\s+points?\s+(?:credited|earned)/i, "reward-points"],
+  [/limit\s+(?:modified|enhanced|changed|increased|decreased)|new\s+limit\s*[:.]?\s*(?:rs|inr|₹)/i, "limit-change"],
   [/has\s+requested|payment\s+request|collect\s+request|requesting\s+(?:₹|rs|inr|money)/i, "collect-request"],
   [/(?:transaction|payment|txn).{0,60}?(?:failed|declined|unsuccessful|could\s+not\s+be)/i, "failed"],
   [/(?:failed|declined|unsuccessful)\s+(?:transaction|payment|txn)/i, "failed"],
@@ -60,6 +67,22 @@ const STRONG_POSITIVE: RegExp[] = [
   /(?:refund|reversal)\s+(?:of|for|processed|credited)/i,
   /transaction\s+(?:of|alert|for)\b/i,
   /\btxn\b.{0,40}?(?:₹|rs\.?|inr)/i,
+  /\bdeposited\b/i,
+  // SMS's terser phrasing drops the "you" that email's STRONG_POSITIVE
+  // patterns above assume ("Sent Rs.214.00 From...", "Spent Rs.6802.61 On...",
+  // not "you sent"/"you have paid") — a leading verb immediately followed by
+  // a currency-marked amount, with nothing in between, unlike the "spent...of/
+  // at/worth/using/on" pattern above which requires a preposition right after
+  // the verb and misses "Spent Rs.X On" (amount sits between verb and
+  // preposition in real SMS).
+  /\b(?:sent|spent|paid|received)\s+(?:₹|rs\.?|inr)\s?[\d,]/i,
+  // Card-present SMS confirmations often carry no verb at all ("Rs.649
+  // without OTP/PIN HDFC Bank Card x5323 At NETFLIX") — the amount directly
+  // followed by this exact disclaimer phrase is itself the transaction signal.
+  /(?:₹|rs\.?|inr)\s?[\d,]+(?:\.\d{1,2})?\s+without\s+otp\s*\/?\s*pin/i,
+  // Labeled-field mandate/autopay confirmations ("Txn Amt:INR649.00") have no
+  // narrative verb at all — the label itself is the signal.
+  /\btxn\s*amt\s*[:.]?\s*(?:₹|rs\.?|inr)/i,
 ];
 
 const AMOUNT_RE = /(?:₹|(?:rs|inr)\.?\s?)\s*[\d,]+(?:\.\d{1,2})?/i;

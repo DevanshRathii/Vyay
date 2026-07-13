@@ -43,6 +43,15 @@ const DEBIT_PATTERNS: RegExp[] = [
   /successful(?:ly)?\s+(?:paid|sent|transferred)/i,
   /(?:card|account|a\/c)[^.\n]{0,40}?has\s+been\s+used\s+(?:for|at|on)/i,
   /\bdebit(?:ed)?\b(?!\s+card\b)/i,
+  // SMS-terse leading verb immediately followed by the amount, no preposition
+  // or "you" in between ("Sent Rs.214.00 From...", "Spent Rs.6802.61 On...").
+  /\b(?:sent|spent|paid)\s+(?:₹|rs\.?|inr)\s?[\d,]/i,
+  // Card-present confirmation with no verb at all — the disclaimer phrase
+  // immediately after the amount is itself the debit signal.
+  /(?:₹|rs\.?|inr)\s?[\d,]+(?:\.\d{1,2})?\s+without\s+otp\s*\/?\s*pin/i,
+  // Labeled autopay/e-mandate success template ("Txn Amt:INR649.00") — a
+  // recurring-mandate collection is always a debit from the payer's side.
+  /\btxn\s*amt\s*[:.]?\s*(?:₹|rs\.?|inr)/i,
 ];
 
 const CREDIT_PATTERNS: RegExp[] = [
@@ -53,6 +62,8 @@ const CREDIT_PATTERNS: RegExp[] = [
   /(?:refund|reversal)\s+(?:of|for|processed|credited)/i,
   /deposited/i,
   /\bcredit(?:ed)?\b(?!\s+(?:card|limit|score)\b)/i,
+  // SMS-terse leading verb immediately followed by the amount.
+  /\breceived\s+(?:₹|rs\.?|inr)\s?[\d,]/i,
 ];
 
 function firstMatchIndex(text: string, patterns: RegExp[]): number {
@@ -238,6 +249,13 @@ function fromNarration(text: string): { merchant?: string; upiId?: string; ref?:
 const MERCHANT_PATTERNS: Array<{ re: RegExp; group: number; source: "info-freetext" | "pattern" }> = [
   { re: /(?:Info|Remarks?|Narration|Description)\s*[:\-]\s*(?:UPI[/-][A-Z]{2}[/-]\d+[/-])?([^\n\r]{2,60})/i, group: 1, source: "info-freetext" },
   { re: /\bat\s+([A-Z0-9][\w &.'*@-]{1,50}?)(?=\s+on\s|\s+using\s|\s+via\s|\s+vide\s|[.,;\n/]|$)/, group: 1, source: "pattern" },
+  // Labeled autopay/e-mandate success template: "For NETFLIX Txn Amt:INR649.00
+  // Dt:11/07/2026 Via:...". The lookahead requires one of this template's own
+  // field labels to follow directly — no punctuation/end-of-string fallback —
+  // so this can't fire on ordinary "for X" prose elsewhere and swallow half
+  // the message (confirmed: an earlier, looser version of this pattern did
+  // exactly that against unrelated email fixtures).
+  { re: /\bFor\s+([A-Z0-9][\w &.'*-]{1,50}?)(?=\s+(?:Txn|Dt|Via)\b)/i, group: 1, source: "pattern" },
   { re: /(?:paid|sent|payment)\s+(?:of\s+(?:₹|rs\.?|inr)\s?[\d,.]+\s+)?to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|for|is|was|has)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
   { re: /(?:transferred?|remitted)\s+to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
   { re: /(?:received|credited)\s+from\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|to)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
@@ -359,28 +377,54 @@ const MONTHS: Record<string, number> = {
 
 const DATE_RE =
   /\bon\s+(\d{1,2})[-/ ]([a-z]{3,9}|\d{1,2})[-/ ](\d{2,4})(?:[\s,]+(?:at\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?)?/i;
+/** Card-spend SMS templates often use "On 2026-06-28:10:34:11" (colon, not
+ *  space, before the time) alongside the more common "On DD-MM-YY" — a
+ *  distinct format the main DATE_RE's day-first grouping can't parse. */
+const ISO_DATE_RE = /\bon\s+(\d{4})-(\d{1,2})-(\d{1,2})[:\s](\d{1,2}):(\d{2})(?::(\d{2}))?/i;
 const TIME_RE = /\bat\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?\b/i;
 
 /**
- * Parse "on 05-07-26 at 14:32" style timestamps. Indian banks write
- * dd-mm-yyyy and times in IST; the result is converted to UTC ms.
- * Falls back to the email's arrival time when parsing fails or the parsed
- * value is implausibly far from it.
+ * Parse "on 05-07-26 at 14:32" / "on 2026-06-28:10:34:11" style timestamps.
+ * Indian banks write dd-mm-yyyy (or, on some card-spend templates, an ISO-
+ * ish yyyy-mm-dd) and times in IST; the result is converted to UTC ms. Falls
+ * back to the caller's own arrival/timestamp time-of-day when the body
+ * doesn't spell out a clock time, or entirely when no date parses at all —
+ * `precise` is false in both fallback cases, true only when an actual
+ * time-of-day was read from the body itself. This distinction matters for
+ * cross-source dedup: a transaction whose time is a fallback guess needs a
+ * wider matching window than one with a real parsed timestamp.
  */
-export function extractOccurredAt(text: string, internalDate: number): { ms: number; parsed: boolean } {
+export function extractOccurredAt(text: string, internalDate: number): { ms: number; parsed: boolean; precise: boolean } {
+  const iso = ISO_DATE_RE.exec(text);
+  if (iso) {
+    const year = parseInt(iso[1], 10);
+    const month = parseInt(iso[2], 10) - 1;
+    const day = parseInt(iso[3], 10);
+    const hh = parseInt(iso[4], 10);
+    const mm = parseInt(iso[5], 10);
+    const ss = iso[6] ? parseInt(iso[6], 10) : 0;
+    if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+      const ms = Date.UTC(year, month, day, hh, mm, ss) - IST_OFFSET_MS;
+      if (Math.abs(ms - internalDate) <= 400 * 24 * 3600 * 1000) {
+        return { ms, parsed: true, precise: true };
+      }
+    }
+  }
+
   const m = DATE_RE.exec(text);
-  if (!m) return { ms: internalDate, parsed: false };
+  if (!m) return { ms: internalDate, parsed: false, precise: false };
   const day = parseInt(m[1], 10);
   let month: number;
   if (/^\d+$/.test(m[2])) month = parseInt(m[2], 10) - 1;
   else month = MONTHS[m[2].slice(0, 3).toLowerCase()] ?? -1;
   let year = parseInt(m[3], 10);
   if (year < 100) year += 2000;
-  if (month < 0 || month > 11 || day < 1 || day > 31) return { ms: internalDate, parsed: false };
+  if (month < 0 || month > 11 || day < 1 || day > 31) return { ms: internalDate, parsed: false, precise: false };
 
-  // Default to the email's own arrival time-of-day (IST) when the body doesn't
-  // spell out a clock time — these are near-real-time bank alerts, so that's a
-  // far better estimate than assuming midnight.
+  // Default to the caller's own arrival time-of-day (IST) when the body
+  // doesn't spell out a clock time — these are near-real-time bank alerts, so
+  // that's a far better estimate than assuming midnight, but it's still a
+  // guess (`precise: false`), not a time actually read from the message.
   const arrivalIst = new Date(internalDate + IST_OFFSET_MS);
   let hh = arrivalIst.getUTCHours();
   let mm = arrivalIst.getUTCMinutes();
@@ -389,6 +433,7 @@ export function extractOccurredAt(text: string, internalDate: number): { ms: num
     const tm = TIME_RE.exec(text);
     return tm ? { h: tm[1], m: tm[2], s: tm[3], ap: tm[4] } : null;
   })();
+  const precise = Boolean(timeMatch);
   if (timeMatch) {
     hh = parseInt(timeMatch.h, 10);
     mm = parseInt(timeMatch.m, 10);
@@ -401,9 +446,9 @@ export function extractOccurredAt(text: string, internalDate: number): { ms: num
   const ms = Date.UTC(year, month, day, hh, mm, ss) - IST_OFFSET_MS;
   // Sanity: within 400 days of arrival, otherwise trust the email timestamp.
   if (Math.abs(ms - internalDate) > 400 * 24 * 3600 * 1000) {
-    return { ms: internalDate, parsed: false };
+    return { ms: internalDate, parsed: false, precise: false };
   }
-  return { ms, parsed: true };
+  return { ms, parsed: true, precise };
 }
 
 // ── Orchestrator ────────────────────────────────────────────────────────────
@@ -451,7 +496,7 @@ export function parseEmail(email: EmailMessage): ParsedTransaction | null {
   const referenceNumber = narration.ref ?? extractReference(text);
   const cardLast4 = extractCardLast4(text);
   const channel = extractChannel(text, provider?.channelHint);
-  const { ms: occurredAt, parsed: dateParsed } = extractOccurredAt(text, email.internalDate);
+  const { ms: occurredAt, parsed: dateParsed, precise: occurredAtPrecise } = extractOccurredAt(text, email.internalDate);
 
   let confidence = 0.4;
   if (provider) confidence += 0.25;
@@ -474,6 +519,7 @@ export function parseEmail(email: EmailMessage): ParsedTransaction | null {
     upiId,
     cardLast4,
     occurredAt,
+    occurredAtPrecise,
     confidence: Math.round(confidence * 100) / 100,
     provider: provider?.id ?? "generic",
   };

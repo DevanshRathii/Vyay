@@ -105,11 +105,21 @@ export const transactions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** null for manual/seed transactions */
+    /** null for manual/seed transactions; source-prefixed for non-Gmail rows
+     *  (sms:<hash>, wallet:<hash>) — reused rather than renamed to keep the
+     *  existing (userId, gmailMessageId) unique index doing double duty as
+     *  the general idempotency key across every ingestion source. */
     gmailMessageId: text("gmail_message_id"),
-    source: text("source").notNull().default("gmail"), // gmail | manual | seed
+    source: text("source").notNull().default("gmail"), // gmail | sms | wallet | manual | seed
     /** transaction time, ms epoch */
     occurredAt: epochMs("occurred_at").notNull(),
+    /** False when occurredAt is a fallback guess (arrival time, or a bare
+     *  date with no clock time) rather than an actual time-of-day read from
+     *  the message — see src/lib/parsing/engine.ts's extractOccurredAt.
+     *  Cross-source dedup widens its matching window when either side of a
+     *  comparison isn't precise, since a 3-minute window is meaningless
+     *  against a guessed timestamp. */
+    occurredAtPrecise: boolean("occurred_at_precise").notNull().default(true),
     /** stored in paise to avoid floating point issues; bigint so very large
      *  transfers fit. Null for keyed users — amount lives inside encPayload. */
     amountPaise: bigint("amount_paise", { mode: "number" }),

@@ -759,6 +759,95 @@ function ShortcutCard() {
   );
 }
 
+// ── SMS + Apple Wallet automations ──────────────────────────────────────────
+// Real-time capture beyond Gmail — same Bearer-token trust model as the
+// Shortcut endpoint above, posted to /api/ingest instead. Setup is entirely
+// on-device (Shortcuts personal automations); nothing here can configure it
+// for you, only document the exact recipe.
+
+function SmsWalletCard() {
+  const [origin, setOrigin] = useState("https://your-vyay-host");
+  useEffect(() => setOrigin(window.location.origin), []);
+
+  return (
+    <Card>
+      <CardHeader
+        title="SMS & Apple Wallet"
+        subtitle="Catch bank alerts and Apple Pay taps the moment they happen, on top of Gmail"
+      />
+      <div className="flex flex-col gap-5 px-5 pb-5 pt-2 text-[13px] leading-relaxed text-muted">
+        <div>
+          <p className="mb-2 font-medium text-fg">SMS — two automations (iOS needs one per condition)</p>
+          <ol className="list-decimal space-y-2 pl-5 marker:font-medium marker:text-fg">
+            <li>
+              In Shortcuts → Automation, create <span className="font-medium text-fg">When I get a message</span>{" "}
+              containing <code className="rounded bg-card-2 px-1 font-mono text-[12px]">debited</code>. Repeat with a
+              second automation for <code className="rounded bg-card-2 px-1 font-mono text-[12px]">credited</code> —
+              &ldquo;Message Contains&rdquo; can only OR across two automations, not within one.
+            </li>
+            <li>
+              Set both to <span className="font-medium text-fg">Run Immediately</span> and turn off &ldquo;Notify When
+              Run&rdquo; for silence — the endpoint is the filter, not the automation.
+            </li>
+            <li>
+              Add <span className="font-medium text-fg">Get Contents of URL</span> to each:
+              <div className="mt-2 space-y-1 rounded-xl bg-card-2 p-3.5 font-mono text-[12px] text-fg">
+                <p>URL: {origin}/api/ingest</p>
+                <p>Method: POST</p>
+                <p>Headers: Authorization: Bearer vyay_…your token…</p>
+                <p>
+                  {'Body (JSON): { "type": "sms", "body": '}
+                  <span className="text-accent">Shortcut Input</span>
+                  {", \"timestamp\": "}
+                  <span className="text-accent">Current Date</span>
+                  {" }"}
+                </p>
+              </div>
+            </li>
+          </ol>
+          <p className="mt-2 text-[12px]">
+            OTPs, promos, and reminders will still reach the endpoint since it filters on message content, not what
+            you set up — it always replies success so Shortcuts never nags you about a rejected one.
+          </p>
+        </div>
+        <div>
+          <p className="mb-2 font-medium text-fg">Apple Wallet — one automation, fully automatic</p>
+          <ol className="list-decimal space-y-2 pl-5 marker:font-medium marker:text-fg">
+            <li>
+              In Shortcuts → Automation, create a <span className="font-medium text-fg">Transaction</span> automation
+              (Wallet section) — leave card/merchant filters empty to catch every Apple Pay payment.
+            </li>
+            <li>
+              Set <span className="font-medium text-fg">Run Immediately</span>, notifications off, then add{" "}
+              <span className="font-medium text-fg">Get Contents of URL</span>:
+              <div className="mt-2 space-y-1 rounded-xl bg-card-2 p-3.5 font-mono text-[12px] text-fg">
+                <p>URL: {origin}/api/ingest</p>
+                <p>Method: POST</p>
+                <p>Headers: Authorization: Bearer vyay_…your token…</p>
+                <p>
+                  {'Body (JSON): { "type": "wallet", "merchant": '}
+                  <span className="text-accent">Merchant</span>
+                  {', "amount": '}
+                  <span className="text-accent">Amount</span>
+                  {', "card": '}
+                  <span className="text-accent">Card</span>
+                  {", \"timestamp\": "}
+                  <span className="text-accent">Current Date</span>
+                  {" }"}
+                </p>
+              </div>
+            </li>
+          </ol>
+          <p className="mt-2 text-[12px]">
+            Only fires on Apple Pay itself — a physical card swipe or a bank&apos;s own SMS/email for the same
+            purchase still lands separately; Vyay&apos;s cross-source dedup keeps it from double-counting.
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // ── Account ─────────────────────────────────────────────────────────────────
 // Rendered by the real settings page only, NOT inside SettingsPanels — the
 // demo shell reuses SettingsPanels and must not show a sign-out. This is
@@ -795,6 +884,7 @@ export function SettingsPanels() {
         <TokensCard />
         <ExportCard />
         <ShortcutCard />
+        <SmsWalletCard />
       </div>
     </Suspense>
   );

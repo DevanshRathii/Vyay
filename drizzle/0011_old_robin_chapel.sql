@@ -1,0 +1,1 @@
+ALTER TABLE "transactions" ADD COLUMN "occurred_at_precise" boolean DEFAULT true NOT NULL;
