@@ -867,12 +867,20 @@ function SmsWalletCard() {
         <details className="text-[12px]">
           <summary className="cursor-pointer font-medium text-fg">Building the shortcut yourself (for {origin})</summary>
           <div className="mt-2 space-y-1 rounded-xl bg-card-2 p-3.5 font-mono text-[12px] text-fg">
-            <p>Action 1: Ask for Input (Text) — set as an import question, prompt &quot;Vyay API token&quot;</p>
-            <p>Action 2: Get Contents of URL</p>
+            <p>One action: Get Contents of URL</p>
             <p className="pl-3">URL: {origin}/api/ingest</p>
             <p className="pl-3">Method: POST</p>
-            <p className="pl-3">Headers: Authorization: Bearer [Action 1 result]</p>
-            <p className="pl-3">Body (JSON): [Shortcut Input, forwarded as-is]</p>
+            <p className="pl-3">
+              Headers: Authorization: Bearer [tap the value, set to &quot;Ask Each Time&quot; — not a literal
+              &quot;Ask for Input&quot; action, which would re-prompt on every run]
+            </p>
+            <p className="pl-3">Request Body: JSON → Shortcut Input, forwarded as-is</p>
+            <p className="mt-1">
+              When sharing (Share → Copy iCloud Link), Shortcuts detects the &quot;Ask Each Time&quot; value and offers
+              to turn it into an import question — set its prompt to &quot;Vyay API token&quot;. Whoever imports the
+              link answers once; it&apos;s then fixed in their copy, never asked again.
+            </p>
+            <p className="mt-1">Full step-by-step: docs/shortcuts-setup.md in the repo.</p>
           </div>
         </details>
       </div>
