@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "parser_version_applied" integer DEFAULT 0 NOT NULL;

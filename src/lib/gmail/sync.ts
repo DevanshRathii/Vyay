@@ -55,6 +55,13 @@ function shouldWriteProgress(processed: number, total: number): boolean {
 // more than this sustained — headroom is intentional, not a bottleneck.
 const CONCURRENCY = 10;
 
+function gmailErrorStatus(err: unknown): number | undefined {
+  return (
+    (err as { code?: number; response?: { status?: number } })?.code ??
+    (err as { response?: { status?: number } })?.response?.status
+  );
+}
+
 /** Retry Gmail API calls on rate-limit / transient server errors. */
 async function withRetry<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
   let lastErr: unknown;
@@ -63,8 +70,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
       return await fn();
     } catch (err) {
       lastErr = err;
-      const status = (err as { code?: number; response?: { status?: number } })?.code ??
-        (err as { response?: { status?: number } })?.response?.status;
+      const status = gmailErrorStatus(err);
       if (status === 429 || status === 500 || status === 503 || status === 403) {
         await sleep(500 * 2 ** i + Math.random() * 250);
         continue;
@@ -73,6 +79,21 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
     }
   }
   throw lastErr;
+}
+
+/**
+ * True for a single-message failure that means "this message is gone/
+ * unreachable" rather than a systemic problem with the sync itself — a
+ * message can be listed (or referenced by a history event) and then
+ * deleted, expunged, or otherwise become inaccessible before the sync gets
+ * around to fetching it. Gmail answers with 404 ("Requested entity was not
+ * found") in that case. Treating this as fatal for the whole sync run was a
+ * real production bug: one vanished message aborted ingestion of every
+ * other message still queued behind it in the same batch, and left the
+ * connection stuck on syncStatus "error" until the next manual retry.
+ */
+function isMissingMessageError(err: unknown): boolean {
+  return gmailErrorStatus(err) === 404;
 }
 
 /** Fixed anchor for a brand-new connection's first sync: 1-Jan-2026, 00:00 IST. */
@@ -133,7 +154,15 @@ async function fetchAndIngest(
       complete = false;
       return;
     }
-    const res = await withRetry(() => gmail.users.messages.get({ userId: "me", id, format: "full" }));
+    let res;
+    try {
+      res = await withRetry(() => gmail.users.messages.get({ userId: "me", id, format: "full" }));
+    } catch (err) {
+      if (!isMissingMessageError(err)) throw err;
+      skipped++;
+      processed++;
+      return; // message vanished between listing and fetching — not fatal
+    }
     const email = toEmailMessage(res.data);
     const outcome = await ingestEmail(conn.userId, email, ctx, contactCtx, publicKey);
     if (outcome.status === "inserted") inserted++;
@@ -223,9 +252,7 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection, dea
       await setProgress(conn.id, "listing", ids.length, 0);
     } while (pageToken);
   } catch (err) {
-    const status = (err as { code?: number; response?: { status?: number } })?.code ??
-      (err as { response?: { status?: number } })?.response?.status;
-    if (status === 404) {
+    if (gmailErrorStatus(err) === 404) {
       // historyId expired — fall back to a query sync from the last checkpoint.
       const afterSec = Math.floor(((conn.lastSyncAt ?? Date.now()) - 24 * 3600 * 1000) / 1000);
       return fullSync(gmail, conn, deadline, { afterUnixSec: afterSec });
@@ -242,16 +269,23 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection, dea
   await setProgress(conn.id, "listing", 0, fresh.length);
   await mapLimit(fresh, CONCURRENCY, async (id) => {
     if (Date.now() > deadline) return; // still in `fresh` — picked up again next time
-    const res = await withRetry(() =>
-      gmail.users.messages.get({
-        userId: "me",
-        id,
-        format: "metadata",
-        metadataHeaders: ["From", "Subject"],
-      }),
-    );
-    const { from, subject } = headerFromMetadata(res.data);
-    if (looksRelevant(from, subject)) relevant.push(id);
+    let res;
+    try {
+      res = await withRetry(() =>
+        gmail.users.messages.get({
+          userId: "me",
+          id,
+          format: "metadata",
+          metadataHeaders: ["From", "Subject"],
+        }),
+      );
+    } catch (err) {
+      if (!isMissingMessageError(err)) throw err;
+      filtered++;
+      return; // message vanished between the history event and this fetch
+    }
+    const { from } = headerFromMetadata(res.data);
+    if (looksRelevant(from)) relevant.push(id);
     filtered++;
     if (shouldWriteProgress(filtered, fresh.length)) await setProgress(conn.id, "listing", filtered, fresh.length);
   });

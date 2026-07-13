@@ -17,7 +17,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
-import { Badge, Button, Card, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
+import { Badge, Button, Card, ConfirmButton, Dialog, Empty, Input, Label, Select, Skeleton, Spinner } from "@/components/ui";
 import { useE2EOptional } from "@/components/e2e-provider";
 import type { TransactionEncPayload } from "@/lib/ingest";
 import { matchesLedgerFilters } from "@/lib/transactions";
@@ -184,12 +184,13 @@ function LedgerInner() {
       }
       // else: a dual-read plaintext straggler row — PATCH notes as plaintext, same as non-keyed.
     }
-    await fetch(`/api/transactions/${id}`, {
+    const res = await fetch(`/api/transactions/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patchBody),
     });
     mutate();
+    if (!res.ok) throw new Error("Couldn't save that change — try again.");
   }
 
   function resetFilters(fn: () => void) {
@@ -296,7 +297,7 @@ function LedgerInner() {
       </div>
 
       {/* Desktop table */}
-      <Card className="hidden overflow-x-auto md:block">
+      <Card elevation="raised" className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[820px] border-collapse">
           <thead className="border-b border-line">
             <tr>
@@ -310,20 +311,25 @@ function LedgerInner() {
             </tr>
           </thead>
           <tbody>
-            {data?.rows.map((t) => (
+            {data?.rows.map((t, i) => (
               <tr
                 key={t.id}
                 onClick={() => setEditing(t)}
                 className={cn(
-                  "cursor-pointer border-b border-line/70 last:border-0 hover:bg-card-2/60",
+                  "cursor-pointer transition-shadow duration-150 hover:bg-card-2 hover:shadow-[inset_0_0_0_1px_var(--line)]",
+                  i < 15 && "animate-fade-rise-in",
                   t.deletedAt && "opacity-50",
                 )}
+                style={i < 15 ? { animationDelay: `${i * 20}ms` } : undefined}
               >
-                <td className="whitespace-nowrap px-3 py-2.5 text-[13px]">
+                <td
+                  className="whitespace-nowrap px-3 py-3.5 text-[13px]"
+                  style={{ boxShadow: `inset 3px 0 0 0 ${t.direction === "credit" ? "var(--positive)" : "var(--negative)"}` }}
+                >
                   <div>{fmtDate(t.occurredAt)}</div>
                   <div className="text-[11px] text-muted">{fmtTime(t.occurredAt)}</div>
                 </td>
-                <td className="max-w-[220px] px-3 py-2.5 text-[13px]">
+                <td className="max-w-[220px] px-3 py-3.5 text-[13px]">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium capitalize">{t.merchant ?? t.upiId ?? "—"}</span>
                     {isLowConfidenceMerchant(t) && (
@@ -343,14 +349,14 @@ function LedgerInner() {
                     {t.upiId && t.merchant ? ` · ${t.upiId}` : ""}
                   </div>
                 </td>
-                <td className={cn("whitespace-nowrap px-3 py-2.5 text-right text-[13px] font-semibold tabular-nums", t.direction === "credit" ? "text-positive" : "")}>
+                <td className={cn("whitespace-nowrap px-3 py-3.5 text-right text-[13px] font-semibold tabular-nums", t.direction === "credit" ? "text-positive" : "")}>
                   <span className="inline-flex items-center gap-1">
                     {t.direction === "credit" ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5 text-muted" />}
                     {formatINR(t.amountPaise)}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-[13px] text-muted">{t.channel ?? "—"}</td>
-                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                <td className="px-3 py-3.5 text-[13px] text-muted">{t.channel ?? "—"}</td>
+                <td className="px-3 py-3.5" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     <Select
                       value={t.categoryId ?? ""}
@@ -372,8 +378,8 @@ function LedgerInner() {
                     )}
                   </div>
                 </td>
-                <td className="max-w-[180px] truncate px-3 py-2.5 text-[13px] text-muted">{t.notes ?? ""}</td>
-                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                <td className="max-w-[180px] truncate px-3 py-3.5 text-[13px] text-muted">{t.notes ?? ""}</td>
+                <td className="px-3 py-3.5" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditing(t)} aria-label="Edit">
                       <Pencil className="h-3.5 w-3.5" />
@@ -383,9 +389,16 @@ function LedgerInner() {
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
                     ) : (
-                      <Button variant="danger" size="icon" className="h-8 w-8" onClick={() => patch(t.id, { deleted: true })} aria-label="Delete">
+                      <ConfirmButton
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label="Delete"
+                        confirmTitle="Delete transaction?"
+                        confirmMessage="It moves to the Deleted filter and can be restored later — this doesn't remove it permanently."
+                        onConfirm={() => patch(t.id, { deleted: true })}
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      </ConfirmButton>
                     )}
                   </div>
                 </td>
@@ -394,8 +407,10 @@ function LedgerInner() {
           </tbody>
         </table>
         {isLoading && !data && (
-          <div className="flex h-40 items-center justify-center">
-            <Spinner />
+          <div className="flex flex-col gap-1 p-3">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 w-full" />
+            ))}
           </div>
         )}
         {data && data.rows.length === 0 && emptyState}
@@ -403,14 +418,13 @@ function LedgerInner() {
 
       {/* Mobile cards */}
       <div className="flex flex-col gap-2 md:hidden">
-        {isLoading && !data && (
-          <div className="flex h-40 items-center justify-center">
-            <Spinner />
-          </div>
-        )}
-        {data?.rows.map((t) => (
+        {isLoading &&
+          !data &&
+          Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-[74px] w-full rounded-2xl" />)}
+        {data?.rows.map((t, i) => (
           <Card
             key={t.id}
+            elevation="raised"
             role="button"
             tabIndex={0}
             onClick={() => setEditing(t)}
@@ -421,7 +435,8 @@ function LedgerInner() {
               }
             }}
             aria-label={`Edit transaction: ${t.merchant ?? t.upiId ?? "Transaction"}, ${formatINR(t.amountPaise)}`}
-            className={cn("cursor-pointer p-3.5", t.deletedAt && "opacity-50")}
+            className={cn("cursor-pointer p-3.5 transition-shadow", i < 15 && "animate-fade-rise-in", t.deletedAt && "opacity-50")}
+            style={i < 15 ? { animationDelay: `${i * 20}ms` } : undefined}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -592,17 +607,20 @@ function EditDialog({
           </div>
           <div className="flex items-center justify-between pt-1">
             <div className="flex items-center gap-1.5">
-              <Button variant="danger" size="sm" onClick={onDeleteToggle}>
-                {txn.deletedAt ? (
-                  <>
-                    <RotateCcw className="h-3.5 w-3.5" /> Restore
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-3.5 w-3.5" /> Delete
-                  </>
-                )}
-              </Button>
+              {txn.deletedAt ? (
+                <Button variant="danger" size="sm" onClick={onDeleteToggle}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Restore
+                </Button>
+              ) : (
+                <ConfirmButton
+                  size="sm"
+                  confirmTitle="Delete transaction?"
+                  confirmMessage="It moves to the Deleted filter and can be restored later — this doesn't remove it permanently."
+                  onConfirm={onDeleteToggle}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </ConfirmButton>
+              )}
               <Button variant="ghost" size="sm" onClick={() => setReporting(true)} title="Send the original email to Devansh to fix parsing">
                 <Flag className="h-3.5 w-3.5" /> Report a bad parse
               </Button>

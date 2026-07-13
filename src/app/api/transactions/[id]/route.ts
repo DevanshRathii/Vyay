@@ -9,6 +9,11 @@ export const dynamic = "force-dynamic";
 
 const patchSchema = z.object({
   categoryId: z.string().nullable().optional(),
+  /** Only meaningful alongside categoryId — set together by parser-sync
+   *  (src/lib/parser-sync.ts) when it fills in a category the parser found
+   *  that a manual edit hadn't already set. Not something a normal client
+   *  needs to send on its own. */
+  categorySource: z.enum(["user", "brand", "generic"]).nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
   deleted: z.boolean().optional(),
   /** Escape hatch for a false-positive duplicate flag — only `null` is
@@ -16,7 +21,8 @@ const patchSchema = z.object({
    *  again); a user can't set someone else's id here. */
   duplicateOfId: z.null().optional(),
   /** For keyed users only: the whole sensitive payload, re-sealed client-side
-   *  after editing notes. The server never decrypts it — just stores it. */
+   *  after editing notes (or after parser-sync re-derives merchant/etc). The
+   *  server never decrypts it — just stores it. */
   encPayload: z.string().optional(),
 });
 
@@ -28,7 +34,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest(parsed.error.issues[0].message);
-  const { categoryId, notes, deleted, duplicateOfId, encPayload } = parsed.data;
+  const { categoryId, categorySource, notes, deleted, duplicateOfId, encPayload } = parsed.data;
 
   const owned = (
     await db
@@ -52,6 +58,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const update: Record<string, unknown> = { updatedAt: Date.now() };
   if (categoryId !== undefined) update.categoryId = categoryId;
+  if (categorySource !== undefined) update.categorySource = categorySource;
   if (notes !== undefined) update.notes = notes;
   if (deleted !== undefined) update.deletedAt = deleted ? Date.now() : null;
   if (duplicateOfId !== undefined) update.duplicateOfId = duplicateOfId;

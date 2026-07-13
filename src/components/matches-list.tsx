@@ -3,7 +3,7 @@
 import { Check, GitMerge, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { Badge, Button, Card, Empty, Spinner } from "@/components/ui";
+import { Badge, Button, Card, ConfirmButton, Empty, Spinner } from "@/components/ui";
 import { useE2EOptional } from "@/components/e2e-provider";
 import { cn, formatINR } from "@/lib/utils";
 
@@ -68,16 +68,21 @@ export function MatchesList() {
   const rows = useDecryptedMatches(data?.rows);
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
 
   async function act(eventId: string, action: "resolve" | "dismiss", transactionId?: string) {
     setBusy(eventId);
-    await fetch(`/api/matches/${eventId}`, {
+    setError(null);
+    const res = await fetch(`/api/matches/${eventId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, transactionId }),
     });
     setBusy(null);
     mutate();
+    if (!res.ok) {
+      throw new Error(action === "dismiss" ? "Couldn't dismiss that — try again." : "Couldn't apply that match — try again.");
+    }
   }
 
   if (!rows) {
@@ -102,6 +107,7 @@ export function MatchesList() {
 
   return (
     <div data-tour="matches-list" className="flex flex-col gap-3">
+      {error && <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[13px] text-negative">{error}</p>}
       {rows.map((e) => {
         const chosen = selected[e.id] ?? (e.candidates.length === 1 ? e.candidates[0].id : "");
         return (
@@ -120,14 +126,22 @@ export function MatchesList() {
                 <Button
                   size="sm"
                   disabled={!chosen || busy === e.id}
-                  onClick={() => act(e.id, "resolve", chosen)}
+                  onClick={() => act(e.id, "resolve", chosen).catch((err) => setError(err.message))}
                 >
                   {busy === e.id ? <Spinner className="border-white/40 border-t-white" /> : <Check className="h-3.5 w-3.5" />}
                   Apply
                 </Button>
-                <Button variant="secondary" size="sm" disabled={busy === e.id} onClick={() => act(e.id, "dismiss")}>
+                <ConfirmButton
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy === e.id}
+                  confirmTitle="Dismiss this log?"
+                  confirmMessage="It won't auto-resolve against future matching transactions either — this discards it for good."
+                  confirmLabel="Dismiss"
+                  onConfirm={() => act(e.id, "dismiss")}
+                >
                   <X className="h-3.5 w-3.5" /> Dismiss
-                </Button>
+                </ConfirmButton>
               </div>
             </div>
 

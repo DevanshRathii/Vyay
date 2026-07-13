@@ -241,6 +241,17 @@ const MERCHANT_PATTERNS: Array<{ re: RegExp; group: number; source: "info-freete
   { re: /(?:paid|sent|payment)\s+(?:of\s+(?:₹|rs\.?|inr)\s?[\d,.]+\s+)?to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|for|is|was|has)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
   { re: /(?:transferred?|remitted)\s+to\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
   { re: /(?:received|credited)\s+from\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:on|at|via|using|to)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
+  // Some banks (confirmed: Canara) name the counterparty as a bare "from
+  // NAME" / "to NAME" right after the masked account number, with no VPA
+  // and no "paid/sent/transferred/received" verb adjacent to it: "...to
+  // your account XXXX0039 from SALONI SHARM with UPI Ref No...", "...from
+  // your account XXXX0039 to ASHWIN BHATT with UPI Ref No...". The other
+  // patterns above all require a verb immediately before "from"/"to", so
+  // this phrasing extracted nothing — confirmed production gap (a whole
+  // bank categorizing zero transactions). The negative lookahead keeps this
+  // from firing on "account **7712 to VPA x@y NAME" templates (HDFC etc.),
+  // which extractVpaBeneficiary already handles earlier in the pipeline.
+  { re: /\baccount\s+[Xx*]{2,}\d{2,8}\s+(?:from|to)\s+(?!VPA\b)([^\n\r]{2,50}?)(?=\s+(?:with|on|at|via|using)\b|[.,;\n(/]|$)/i, group: 1, source: "pattern" },
   // NACH/mandate narrations read "towards PAYEE NAME/refcode" — without the
   // "/" stop, the lazy capture runs past the 50-char cap looking for "on"/
   // punctuation and the whole match fails, silently dropping the merchant

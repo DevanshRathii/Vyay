@@ -267,4 +267,55 @@ describe("real production fixtures (found via DB investigation of low-confidence
     // HDFC7021803252008682" and the whole match failed, leaving no merchant.
     expect(p!.merchant).toBe("INDIAN CLEARING CORP");
   });
+
+  // Fixtures below are redacted from real Canara Bank alerts (names, account
+  // digits, and reference numbers replaced with fabricated placeholders) —
+  // the template structure that caused the bug is preserved verbatim.
+  it("Canara Bank UPI credit — bare 'account MASK from NAME' with no VPA at all (confirmed production gap: zero categorized transactions for a live user)", () => {
+    const p = parseEmail(
+      email(
+        "Canara Bank <canarabank@canarabank.com>",
+        "UPI Transaction Alert",
+        "Dear Customer,\n\nThanking you for banking with Canara Bank.\n\nAn amount of INR 4,200.00 has been CREDITED on 03/07/26 to your account  XXXX1234 from TEST PERSONA ONE with UPI Ref No.:100000000001. Total Available Balance INR 1,79,308.52.If you are not expecting this credit or suspect any fraudulent activity, please contact: 18001030\n\n\nThis is an auto generated mail",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.amountPaise).toBe(420000);
+    expect(p!.direction).toBe("credit");
+    expect(p!.merchant).toBe("TEST PERSONA ONE");
+    expect(p!.upiId).toBeUndefined();
+    expect(p!.referenceNumber).toBe("100000000001");
+    expect(p!.channel).toBe("UPI");
+    expect(p!.provider).toBe("canara");
+  });
+
+  it("Canara Bank UPI debit — bare 'account MASK to NAME', and doesn't mistake the Available Balance figure for the transaction amount", () => {
+    const p = parseEmail(
+      email(
+        "Canara Bank <canarabank@canarabank.com>",
+        "UPI Transaction Alert",
+        "Dear Customer,\n\nThanking you for banking with Canara Bank.\n\nAn amount of INR 360.00 has been DEBITED on 10/07/26 from your account XXXX1234 to TEST PERSONA TWO with UPI Ref No.:100000000002. Total Available Balance INR 1,87,348.52.To report fraud & stop further debit transaction, Call : 18001030.\n\nIf the transaction was not initiated by you, send an email from your registered e-mail id with the subject line in the below format to reportfraud@canarabank.com to block.\n\nBLOCKUPI<Space><Mobile Number prefixed with Country Code>\n\nFor blocking through SMS, send SMS from Registered Mobile Number as per below format:\nTo block MObile Banking: BLOCKMB to 9901771222.\n\n\nThis is an auto generated mail",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.amountPaise).toBe(36000);
+    expect(p!.direction).toBe("debit");
+    expect(p!.merchant).toBe("TEST PERSONA TWO");
+    expect(p!.referenceNumber).toBe("100000000002");
+  });
+
+  it("Canara Bank UPI credit — second real sample, different amount/names/ref, same template", () => {
+    const p = parseEmail(
+      email(
+        "Canara Bank <canarabank@canarabank.com>",
+        "UPI Transaction Alert",
+        "Dear Customer,\n\nThanking you for banking with Canara Bank.\n\nAn amount of INR 2,100.00 has been CREDITED on 12/07/26 to your account  XXXX1234 from TEST PERSONA THREE with UPI Ref No.:100000000003. Total Available Balance INR 1,89,448.52.If you are not expecting this credit or suspect any fraudulent activity, please contact: 18001030\n\n\nThis is an auto generated mail",
+      ),
+    );
+    expect(p).not.toBeNull();
+    expect(p!.amountPaise).toBe(210000);
+    expect(p!.direction).toBe("credit");
+    expect(p!.merchant).toBe("TEST PERSONA THREE");
+    expect(p!.referenceNumber).toBe("100000000003");
+  });
 });

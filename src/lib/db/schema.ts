@@ -44,6 +44,11 @@ export const users = pgTable("users", {
    *  seeing the private key. */
   keyCheck: text("key_check"),
   keyCreatedAt: epochMs("key_created_at"),
+  /** Compared against PARSER_VERSION (src/lib/parser-version.ts) to decide
+   *  whether this user's existing ledger needs silent reprocessing after a
+   *  parsing/categorization fix — see src/app/api/parser-sync/*. 0 = never
+   *  synced (treated as "needs sync" against any real PARSER_VERSION). */
+  parserVersionApplied: integer("parser_version_applied").notNull().default(0),
   createdAt: now(),
 });
 

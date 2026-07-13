@@ -20,19 +20,8 @@ CREATE TABLE "parse_samples" (
 	"created_at" bigint NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "shortcut_events" ADD COLUMN "occurred_at" bigint;--> statement-breakpoint
+ALTER TABLE "transactions" ADD COLUMN "ref_bidx" text;--> statement-breakpoint
 ALTER TABLE "parse_samples" ADD CONSTRAINT "parse_samples_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "parse_samples_resolved_idx" ON "parse_samples" USING btree ("resolved");--> statement-breakpoint
--- Same PostgREST/Data-API lockdown as migration 0008, extended to these two
--- new tables. PGlite's test harness has no anon/authenticated roles, so
--- guard with an existence check to keep migration replay green in tests.
-ALTER TABLE "parse_health_stats" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
-ALTER TABLE "parse_samples" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
-DO $$
-BEGIN
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
-    REVOKE ALL ON parse_health_stats, parse_samples FROM anon;
-  END IF;
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
-    REVOKE ALL ON parse_health_stats, parse_samples FROM authenticated;
-  END IF;
-END $$;
+CREATE INDEX "txn_user_ref_bidx_idx" ON "transactions" USING btree ("user_id","ref_bidx");

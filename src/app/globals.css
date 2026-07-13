@@ -11,42 +11,67 @@
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-accent-fg: #ffffff;
+  --color-gold: var(--gold);
+  --color-gold-fg: #ffffff;
   --color-positive: var(--positive);
   --color-negative: var(--negative);
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
   --radius-xl: 1rem;
   --radius-2xl: 1.25rem;
 }
 
 :root {
   color-scheme: light;
-  --canvas: #f5f5f7;
+  /* Faint blue tint instead of flat gray — cards (pure white) now actually
+     lift off the canvas instead of blending into a wash of near-identical
+     grays. */
+  --canvas: #f4f5f8;
   --card: #ffffff;
   --card-2: #fafafa;
   --fg: #1d1d1f;
   --muted: #6e6e73;
   --line: #e5e5ea;
-  --accent: #0071e3;
+  --accent: #0052cc;
+  /* Warm signal color reserved for money-positive moments (credit amounts,
+     savings callouts) — the single blue accent doing every job read as flat;
+     a fintech UI earns "premium" partly by having one warm counterpoint to
+     the cool primary, used sparingly. */
+  --gold: #b8860b;
   --positive: #1f9d55;
   --negative: #e02d3c;
+  --shadow-resting: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-raised: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-floating: 0 20px 40px rgba(0, 0, 0, 0.12), 0 8px 16px rgba(0, 0, 0, 0.08);
 }
 
 .dark {
   color-scheme: dark;
-  --canvas: #0a0a0b;
-  --card: #1c1c1e;
-  --card-2: #232326;
+  --canvas: #19191d;
+  --card: #232328;
+  --card-2: #29292e;
   --fg: #f5f5f7;
   --muted: #98989d;
-  --line: #2c2c2e;
-  --accent: #0a84ff;
+  --line: #323238;
+  --accent: #3b82f6;
+  --gold: #e0a940;
   --positive: #30d158;
   --negative: #ff453a;
+  --shadow-resting: 0 1px 3px rgba(0, 0, 0, 0.24), 0 1px 2px rgba(0, 0, 0, 0.18);
+  --shadow-raised: 0 4px 16px rgba(0, 0, 0, 0.36), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --shadow-floating: 0 20px 48px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.36);
 }
 
 html {
   -webkit-text-size-adjust: 100%;
+}
+
+/* Buttons already show a deliberate active: pressed state — the browser's
+   default tap-highlight is a rectangular flash that clashes with our rounded
+   pills and reads as broken/glitchy feedback on mobile taps. */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -82,4 +107,110 @@ body {
 select option {
   background-color: var(--card);
   color: var(--fg);
+}
+
+/* Dark-mode cards sit close in value to the canvas — a faint inner top
+   highlight is what separates "elevated surface" from "slightly different
+   gray" without needing a heavier border or shadow. Light mode doesn't need
+   this; white-on-tinted-canvas already reads as lifted. */
+.dark .card-surface {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    var(--tw-shadow, 0 0 #0000);
+}
+
+/* A form control gaining focus inside a card should read as the whole card
+   "lighting up", not just the input itself getting a ring — ties surfaces
+   and forms into one integrated system instead of independently outlined
+   pieces. */
+.card-surface:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 1px;
+}
+
+/* Category color dot — a soft color-matched glow reads as considered rather
+   than a flat filled circle. */
+.category-dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-color) 20%, transparent);
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes float-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes fade-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dialog-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ring-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
+.animate-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.animate-float-bob {
+  animation: float-bob 3s ease-in-out infinite;
+}
+
+.animate-fade-rise-in {
+  animation: fade-rise-in 200ms ease-out both;
+}
+
+.animate-dialog-panel-in {
+  animation: dialog-panel-in 180ms ease-out both;
+}
+
+.animate-ring-pulse {
+  animation: ring-pulse 400ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer,
+  .animate-float-bob,
+  .animate-fade-rise-in,
+  .animate-dialog-panel-in,
+  .animate-ring-pulse {
+    animation: none;
+  }
 }

@@ -1,5 +1,5 @@
 {
-  "id": "c5aa98e5-3824-4c42-855e-e8057bc983ee",
+  "id": "0ab7baf0-82af-465d-8cad-2aedcdce99a3",
   "prevId": "9cf59654-206a-44a5-8417-3a4ba147f343",
   "version": "7",
   "dialect": "postgresql",
@@ -586,166 +586,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.parse_health_stats": {
-      "name": "parse_health_stats",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_count": {
-          "name": "total_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "merchant_hits": {
-          "name": "merchant_hits",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "upi_hits": {
-          "name": "upi_hits",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "ref_hits": {
-          "name": "ref_hits",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "categorized_hits": {
-          "name": "categorized_hits",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "parse_health_stats_provider_unique": {
-          "name": "parse_health_stats_provider_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "provider"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.parse_samples": {
-      "name": "parse_samples",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved": {
-          "name": "resolved",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "parse_samples_resolved_idx": {
-          "name": "parse_samples_resolved_idx",
-          "columns": [
-            {
-              "expression": "resolved",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "parse_samples_user_id_users_id_fk": {
-          "name": "parse_samples_user_id_users_id_fk",
-          "tableFrom": "parse_samples",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.preapproved_emails": {
       "name": "preapproved_emails",
       "schema": "",
@@ -1295,6 +1135,13 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
+        },
+        "parser_version_applied": {
+          "name": "parser_version_applied",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "created_at": {
           "name": "created_at",

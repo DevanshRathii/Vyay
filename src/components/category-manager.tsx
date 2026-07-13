@@ -4,7 +4,8 @@ import { Pencil, Plus, Tags, Trash2, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
-import { Badge, Button, Card, CardHeader, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, ConfirmButton, Dialog, Empty, Input, Label, Select, Spinner } from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 interface CategoryRow {
   id: string;
@@ -21,9 +22,13 @@ interface RuleRow {
   categoryColor: string;
 }
 
+// A custom, evenly-hued palette at consistent saturation/lightness — the
+// previous set was literally iOS's system color tuple, which read as
+// borrowed rather than Vyay's own. Neutral gray stays last for "nothing
+// distinctive" categories.
 const PALETTE = [
-  "#0071e3", "#1f9d55", "#e02d3c", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#8e8e93",
+  "#e5484d", "#f2994a", "#d4a017", "#4caf6d", "#14b8a6",
+  "#2f8fdb", "#6366f1", "#a855f7", "#ec4899", "#8e8e93",
 ];
 
 export function CategoryManager() {
@@ -62,10 +67,11 @@ export function CategoryManager() {
   }
 
   async function deleteCategory(id: string) {
-    await fetch(`/api/categories/${id}`, { method: "DELETE" });
-    setEditing(null);
+    const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
     mutateCats();
     mutateRules();
+    if (!res.ok) throw new Error("Couldn't delete that category — try again.");
+    setEditing(null);
   }
 
   async function createRule(pattern: string, categoryId: string, applyToExisting: boolean) {
@@ -85,8 +91,9 @@ export function CategoryManager() {
   }
 
   async function deleteRule(id: string) {
-    await fetch(`/api/rules/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/rules/${id}`, { method: "DELETE" });
     mutateRules();
+    if (!res.ok) throw new Error("Couldn't delete that rule — try again.");
   }
 
   if (!cats) {
@@ -127,7 +134,10 @@ export function CategoryManager() {
               title={`View ${c.name} transactions in the Ledger`}
             >
               <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium">
-                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.color }} />
+                <span
+                  className="category-dot h-3 w-3 shrink-0 rounded-full"
+                  style={{ background: c.color, "--dot-color": c.color } as React.CSSProperties}
+                />
                 <span className="truncate">{c.name}</span>
               </span>
               <span className="flex shrink-0 items-center gap-2">
@@ -172,9 +182,21 @@ export function CategoryManager() {
                 <span className="text-muted">→</span>
                 <Badge color={r.categoryColor}>{r.categoryName}</Badge>
               </div>
-              <Button variant="danger" size="icon" className="h-8 w-8" onClick={() => deleteRule(r.id)} aria-label="Delete rule">
+              <ConfirmButton
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Delete rule"
+                confirmTitle="Delete this rule?"
+                confirmMessage={
+                  <>
+                    Future emails matching <code className="rounded bg-card-2 px-1 font-mono text-[12px]">{r.pattern}</code> will
+                    no longer auto-categorize into {r.categoryName}.
+                  </>
+                }
+                onConfirm={() => deleteRule(r.id)}
+              >
                 <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              </ConfirmButton>
             </div>
           ))}
           {rules && rules.rows.length === 0 && (
@@ -222,7 +244,7 @@ function CategoryDialog({
   initialColor?: string;
   onClose: () => void;
   onSubmit: (name: string, color: string) => void;
-  onDelete?: () => void;
+  onDelete?: () => Promise<void>;
   deleteHint?: string;
 }) {
   const [name, setName] = useState("");
@@ -248,7 +270,10 @@ function CategoryDialog({
             {PALETTE.map((c) => (
               <button
                 key={c}
-                className="h-8 w-8 rounded-full border-2"
+                className={cn(
+                  "h-8 w-8 scale-100 rounded-full border-2 transition-transform duration-150",
+                  color === c && "scale-110 animate-ring-pulse",
+                )}
                 style={{ background: c, borderColor: color === c ? "var(--fg)" : "transparent" }}
                 onClick={() => setColor(c)}
                 aria-label={`Color ${c}`}
@@ -259,9 +284,18 @@ function CategoryDialog({
         <div className="flex items-center justify-between pt-1">
           {onDelete ? (
             <div className="flex flex-col">
-              <Button variant="danger" size="sm" onClick={onDelete}>
+              <ConfirmButton
+                size="sm"
+                confirmTitle="Delete this category?"
+                confirmMessage={
+                  deleteHint
+                    ? `${deleteHint} This can't be undone.`
+                    : "This can't be undone."
+                }
+                onConfirm={onDelete}
+              >
                 <Trash2 className="h-3.5 w-3.5" /> Delete
-              </Button>
+              </ConfirmButton>
               {deleteHint && <span className="mt-1 max-w-[180px] text-[11px] text-muted">{deleteHint}</span>}
             </div>
           ) : (

@@ -178,8 +178,17 @@ export function senderQuery(providerIds?: string[] | null): string {
   return "(" + domains.map((d) => `from:(${d})`).join(" OR ") + ")";
 }
 
-/** Quick check used by incremental sync before fetching a full message. */
-export function looksRelevant(from: string, subject: string): boolean {
-  if (matchProvider(from)) return true;
-  return /debit|credit|transaction|txn|payment|paid|received|spent|upi|withdrawn/i.test(subject);
+/**
+ * Quick check used by incremental sync before fetching a full message.
+ *
+ * Sender match only — no subject-keyword fallback. classifyEmail()/parseEmail()
+ * have no sender-awareness at all, so this is the only gate standing between
+ * "some email with transaction-shaped words in the subject" and a row in the
+ * ledger. A self-forwarded bank alert ("Fwd: UPI Transaction Alert") has
+ * exactly that subject shape but comes from the user's own address, not a
+ * bank — it must be rejected here, the same way fullSync's sender-scoped
+ * query already rejects it.
+ */
+export function looksRelevant(from: string): boolean {
+  return matchProvider(from) !== undefined;
 }
