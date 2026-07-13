@@ -7,6 +7,13 @@ export function cn(...inputs: ClassValue[]) {
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
+/** Vyay's ledger doesn't track anything before this date — Gmail's initial
+ *  sync anchors here (`buildQuery` in src/lib/gmail/sync.ts) and every
+ *  import path (bank statements, historical SMS) enforces the same floor,
+ *  rejecting rather than silently importing older rows. Shared so the two
+ *  never drift apart. */
+export const TRACKING_BASELINE_MS = Date.UTC(2026, 0, 1) - IST_OFFSET_MS;
+
 /** Format paise as ₹1,23,456.78 (Indian digit grouping). */
 export function formatINR(paise: number, opts: { compact?: boolean } = {}): string {
   const rupees = paise / 100;

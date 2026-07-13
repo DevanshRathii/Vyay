@@ -201,7 +201,7 @@ export async function ingestParsedTransaction(
   userId: string,
   parsed: NormalizedTxn,
   opts: {
-    source: "gmail" | "sms" | "wallet";
+    source: "gmail" | "sms" | "wallet" | "statement";
     externalId: string;
     raw: string | null;
     publicKey: string | null;

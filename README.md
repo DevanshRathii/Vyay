@@ -146,6 +146,7 @@ Optional fields: `direction` (`debit`/`credit`, default debit) and `timestamp` (
 | `ADMIN_GMAIL_APP_PASSWORD` | no | — | A Gmail App Password for `ADMIN_EMAIL` (generate at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords), needs 2-Step Verification on) — sends a real email on a new sign-up or "urgent feedback" submission, via Gmail SMTP, from and to `ADMIN_EMAIL` |
 | `ADMIN_NOTIFY_WEBHOOK_URL` | no | — | POSTed a Slack/Discord-shaped JSON body (`{ text, content }`) on the same two events — point it at an incoming webhook, ntfy.sh topic, etc. Independent of the email above; set either, both, or neither |
 | `NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT` | no | — | Your Google Cloud project id/number — makes `/admin`'s "Add to Google Test users" link go straight to your project instead of the generic console entry point |
+| `NEXT_PUBLIC_VYAY_SHORTCUT_URL` | no | — | iCloud share link for the "Vyay: Log Transaction" action shortcut (see Settings' SMS & Apple Wallet card) — shows an "Add to Shortcuts" button when set |
 
 ## Commands
 

@@ -106,11 +106,12 @@ export const transactions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     /** null for manual/seed transactions; source-prefixed for non-Gmail rows
-     *  (sms:<hash>, wallet:<hash>) — reused rather than renamed to keep the
-     *  existing (userId, gmailMessageId) unique index doing double duty as
-     *  the general idempotency key across every ingestion source. */
+     *  (sms:<hash>, wallet:<hash>, stmt:<hash>) — reused rather than renamed
+     *  to keep the existing (userId, gmailMessageId) unique index doing
+     *  double duty as the general idempotency key across every ingestion
+     *  source. */
     gmailMessageId: text("gmail_message_id"),
-    source: text("source").notNull().default("gmail"), // gmail | sms | wallet | manual | seed
+    source: text("source").notNull().default("gmail"), // gmail | sms | wallet | statement | manual | seed
     /** transaction time, ms epoch */
     occurredAt: epochMs("occurred_at").notNull(),
     /** False when occurredAt is a fallback guess (arrival time, or a bare

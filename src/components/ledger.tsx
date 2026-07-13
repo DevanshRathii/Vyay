@@ -14,6 +14,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
@@ -215,10 +216,18 @@ function LedgerInner() {
       title={showDeleted ? "No deleted transactions" : filtersActive ? "No transactions match your filters" : "No transactions found"}
       hint={filtersActive ? undefined : "Sync Gmail from Settings to import transactions."}
     >
-      {filtersActive && (
+      {filtersActive ? (
         <Button variant="secondary" size="sm" onClick={clearAllFilters} className="mt-1">
           Clear filters
         </Button>
+      ) : (
+        !showDeleted && (
+          <Link href="/settings">
+            <Button variant="secondary" size="sm" className="mt-1">
+              Import a statement
+            </Button>
+          </Link>
+        )
       )}
     </Empty>
   );

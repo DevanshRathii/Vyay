@@ -235,8 +235,14 @@ export function stripDisplaySuffixes(merchant: string): string {
 /**
  * Parse bank UPI narrations like:
  *   "UPI/DR/453212345678/SWIGGY LIMITED/YESB/swiggy@ybl/Payment"
+ * Exported for statement import (src/lib/statement/normalize.ts) — bank
+ * statement narrations use this exact structured format, and the standalone
+ * extractUpiId()'s raw regex scan (no awareness of the "/"-or-"-" segment
+ * boundaries) greedily over-captures the hyphen-heavy variant real HDFC
+ * statements use ("UPI-SWIGGY-swiggy@icici-...") into the VPA's local part.
+ * Always prefer this over a bare extractUpiId() call on narration text.
  */
-function fromNarration(text: string): { merchant?: string; upiId?: string; ref?: string } {
+export function fromNarration(text: string): { merchant?: string; upiId?: string; ref?: string } {
   const m = /UPI[/-](?:DR|CR|P2M|P2A)?[/-]?(\d{9,15})?[/-]([^/\n]{2,40})[/-]([A-Z]{3,6})?[/-]?([a-z0-9._-]+@[a-z0-9]+)?/i.exec(text);
   if (!m) return {};
   return {
