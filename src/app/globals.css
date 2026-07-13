@@ -49,6 +49,14 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Buttons already show a deliberate active: pressed state — the browser's
+   default tap-highlight is a rectangular flash that clashes with our rounded
+   pills and reads as broken/glitchy feedback on mobile taps. */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   background: var(--canvas);
   color: var(--fg);

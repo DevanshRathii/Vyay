@@ -284,8 +284,8 @@ async function incrementalSync(gmail: gmail_v1.Gmail, conn: GmailConnection, dea
       filtered++;
       return; // message vanished between the history event and this fetch
     }
-    const { from, subject } = headerFromMetadata(res.data);
-    if (looksRelevant(from, subject)) relevant.push(id);
+    const { from } = headerFromMetadata(res.data);
+    if (looksRelevant(from)) relevant.push(id);
     filtered++;
     if (shouldWriteProgress(filtered, fresh.length)) await setProgress(conn.id, "listing", filtered, fresh.length);
   });

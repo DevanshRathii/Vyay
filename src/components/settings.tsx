@@ -119,15 +119,24 @@ function GmailCard() {
   const oauthError = params.get("gmail_error");
   const keyed = useE2EOptional()?.status === "ready";
   const { data, mutate } = useSWR<GmailStatus>("/api/gmail/status", {
-    refreshInterval: (latest) => (latest?.syncStatus === "syncing" ? 1500 : 30000),
+    refreshInterval: (latest) =>
+      latest?.syncStatus === "syncing" || Date.now() < fastPollUntil.current ? 1500 : 30000,
   });
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const [reparsing, setReparsing] = useState(false);
   const [reparseResult, setReparseResult] = useState<{ scanned: number; updated: number } | null>(null);
   const [showTrustInfo, setShowTrustInfo] = useState(false);
   const [autoContinues, setAutoContinues] = useState(0);
   const [autoContinueExhausted, setAutoContinueExhausted] = useState(false);
   const prevSyncStatus = useRef<GmailStatus["syncStatus"]>(undefined);
+  // Bridges the gap between "sync request sent" and the backend actually
+  // writing syncStatus:"syncing" to the DB (a real async round trip). Without
+  // this, the status poll can land on stale "idle" data right after a click,
+  // fall back to its slow 30s interval, and let a rapid second click slip
+  // through to a silently-swallowed SyncInProgressError — surfacing as
+  // "nothing happened" until the slow poll eventually catches up.
+  const fastPollUntil = useRef(0);
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(() => new Set(ALL_PROVIDER_IDS));
 
   function toggleProvider(id: string) {
@@ -146,9 +155,17 @@ function GmailCard() {
 
   async function syncNow(full = false) {
     setStarting(true);
-    await fetch(`/api/gmail/sync${full ? "?full=1" : ""}`, { method: "POST" });
-    setStarting(false);
-    mutate();
+    setStartError(null);
+    fastPollUntil.current = Date.now() + 10_000;
+    try {
+      const res = await fetch(`/api/gmail/sync${full ? "?full=1" : ""}`, { method: "POST" });
+      if (!res.ok) setStartError("Couldn't start sync — try again in a moment.");
+    } catch {
+      setStartError("Couldn't reach the server — check your connection and try again.");
+    } finally {
+      setStarting(false);
+      mutate();
+    }
   }
 
   function resumeSync() {
@@ -162,6 +179,7 @@ function GmailCard() {
   // user click "Sync now" again.
   useEffect(() => {
     if (!data) return;
+    if (data.syncStatus === "syncing") setStartError(null);
     const wasSyncing = prevSyncStatus.current === "syncing";
     prevSyncStatus.current = data.syncStatus;
     if (data.initialSyncDone) {
@@ -317,7 +335,10 @@ function GmailCard() {
                 </ActionMenu>
               </div>
             </div>
-            {data.syncStatus === "error" && data.syncError && (
+            {startError && (
+              <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[12px] text-negative">{startError}</p>
+            )}
+            {!startError && data.syncStatus === "error" && data.syncError && (
               <p className="rounded-xl bg-negative/10 px-3.5 py-2.5 text-[12px] text-negative">{data.syncError}</p>
             )}
             {!data.initialSyncDone && !syncing && autoContinueExhausted && (
