@@ -1,4 +1,4 @@
-import { KNOWN_MERCHANTS } from "@/lib/categorize";
+import { KNOWN_MERCHANTS } from "@/lib/categorize-context";
 import { stripDisplaySuffixes } from "@/lib/parsing/engine";
 import { normalizeMerchant } from "@/lib/parsing/normalize";
 
