@@ -106,3 +106,12 @@ In practice, every real signed-in session is keyed by the time it ever reaches a
 
 - Prettier: double quotes, semicolons, 100-char width, trailing commas (`.prettierrc`) — run `npm run format` rather than hand-matching style.
 - No test framework beyond vitest; fixtures for the parsing engine belong in `tests/parsers.test.ts`, classifier cases in `tests/detect.test.ts`, matching logic in `tests/match.test.ts`, sync/tenant-isolation logic in `tests/sync.test.ts`.
+
+## Shipping a major feature
+
+Checklist for anything a test user should actually notice and try (a new ingestion source, a re-skin, a workflow change — not a bug fix or internal refactor):
+
+1. `npm run typecheck && npm run lint && npm run test` all green; `npx next build` succeeds.
+2. If the change touches ingestion/parsing/categorization, bump `PARSER_VERSION` (see "Auto-reprocessing" above) so existing users' data gets the fix too, not just new data.
+3. Merge to `main` (auto-deploys to Vercel).
+4. **Send a newsletter** — `/admin` → "Send feature newsletter". One real email per tester (never a single email with everyone bcc'd), sent via the existing `ADMIN_GMAIL_APP_PASSWORD` SMTP transporter (`src/lib/notify.ts`'s `sendBulkEmail`, template in `src/lib/newsletter-template.ts`). Recipients are every user with `gmailAccessGranted = true`, excluding the admin's own account — keep it short: one headline feature, 1-3 sentences, a CTA link, done. This is a deliberate, explicit action (you click Send after reviewing the recipient count) — nothing sends automatically on deploy.

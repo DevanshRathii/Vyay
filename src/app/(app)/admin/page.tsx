@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/nav";
 import { getIsAdmin } from "@/lib/session";
 import { AdminUsersPanel, ParseHealthPanel, ParseSamplesPanel, PreapprovedPanel } from "@/components/admin-users";
+import { NewsletterPanel } from "@/components/newsletter-panel";
 
 export const metadata = { title: "Admin" };
 
@@ -15,6 +16,7 @@ export default async function AdminPage() {
         <AdminUsersPanel />
         <ParseHealthPanel />
         <ParseSamplesPanel />
+        <NewsletterPanel />
       </div>
     </>
   );
