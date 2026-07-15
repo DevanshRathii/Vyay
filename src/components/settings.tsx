@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   Download,
+  History,
   KeyRound,
   Lock,
   LogOut,
@@ -21,6 +22,7 @@ import { signOut } from "next-auth/react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { ThemeToggle } from "@/components/nav";
+import { StatementImportCard } from "@/components/statement-import";
 import { ActionMenu, ActionMenuItem, Button, Card, CardHeader, ConfirmButton, Input, Label, Spinner } from "@/components/ui";
 import { generateKeypair, makeKeyCheck } from "@/lib/e2e-crypto";
 import { useE2EOptional } from "@/components/e2e-provider";
@@ -508,7 +510,7 @@ function ExportCard() {
       const fromMs = from ? new Date(`${from}T00:00:00+05:30`).getTime() : null;
       const toMs = to ? new Date(`${to}T23:59:59+05:30`).getTime() : null;
       const exportRows: ExportRow[] = rows
-        .filter((t) => t.deletedAt == null)
+        .filter((t) => t.deletedAt == null && t.duplicateOfId == null)
         .filter((t) => (fromMs == null || t.occurredAt >= fromMs) && (toMs == null || t.occurredAt <= toMs))
         .sort((a, b) => b.occurredAt - a.occurredAt)
         .map((t) => ({
@@ -731,8 +733,18 @@ function ShortcutCard() {
               <p>URL: {origin}/api/shortcut/log</p>
               <p>Method: POST</p>
               <p>Headers: Authorization: Bearer vyay_…your token…</p>
-              <p>{'Body (JSON): { "amount": 249.5, "category": "Food", "notes": "lunch" }'}</p>
+              <p>
+                {'Body (JSON): { "amount": 249.5, "category": "Food", "notes": "lunch", "timestamp": '}
+                <span className="text-accent">Current Date</span>
+                {" }"}
+              </p>
             </div>
+            <p className="mt-1.5 text-[12px]">
+              Passing <span className="font-medium text-fg">timestamp</span> (the Shortcuts magic variable{" "}
+              <span className="font-medium text-fg">Current Date</span>, formatted as ISO 8601) matters if you might
+              log the same amount more than once in a day — Vyay uses it to pick the right transaction instead of
+              guessing.
+            </p>
           </li>
           <li>
             Optionally add <span className="font-medium text-fg">Show Result</span> to see the match status — Vyay
@@ -744,6 +756,133 @@ function ShortcutCard() {
           <Smartphone className="h-3.5 w-3.5" /> Tip: add the shortcut to your Home Screen or an Action Button for
           one-tap logging.
         </p>
+      </div>
+    </Card>
+  );
+}
+
+// ── SMS + Apple Wallet automations ──────────────────────────────────────────
+// Real-time capture beyond Gmail, posted to /api/ingest with the same
+// Bearer-token trust model as the Shortcut endpoint above. This is a
+// going-forward-only source: iOS gives no way to read message history, so
+// nothing here can backfill past texts — that's what "Import bank
+// statement" below is for. Setup is on-device (Shortcuts personal
+// automations, which Apple doesn't allow to be shared/imported at all) —
+// this only documents the recipe and, once configured, links to the one
+// piece that CAN be shared: the action shortcut itself.
+
+const SHORTCUT_INSTALL_URL = process.env.NEXT_PUBLIC_VYAY_SHORTCUT_URL;
+
+function SmsWalletCard() {
+  const [origin, setOrigin] = useState("https://your-vyay-host");
+  useEffect(() => setOrigin(window.location.origin), []);
+
+  return (
+    <Card>
+      <CardHeader
+        title="SMS & Apple Wallet"
+        subtitle="Catch bank alerts and Apple Pay taps the moment they happen, on top of Gmail"
+      />
+      <div className="flex flex-col gap-5 px-5 pb-5 pt-2 text-[13px] leading-relaxed text-muted">
+        <p className="flex items-start gap-2 rounded-xl bg-card-2 px-3.5 py-3 text-[12px]">
+          <History className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <span className="font-medium text-fg">Going forward only.</span> iOS has no way for any app — Vyay
+            included — to read your past text messages, so this can only catch SMS/Wallet activity from the moment
+            you finish setup onward. For everything before that, use{" "}
+            <span className="font-medium text-fg">Import bank statement</span> below.
+          </span>
+        </p>
+
+        <div>
+          <p className="mb-2 font-medium text-fg">Step 1 — install the action shortcut, once</p>
+          {SHORTCUT_INSTALL_URL ? (
+            <a href={SHORTCUT_INSTALL_URL} target="_blank" rel="noreferrer">
+              <Button size="sm">
+                <Download className="h-3.5 w-3.5" /> Add &ldquo;Vyay: Log Transaction&rdquo; to Shortcuts
+              </Button>
+            </a>
+          ) : (
+            <p className="rounded-xl bg-card-2 px-3.5 py-2.5 text-[12px]">
+              Shortcut link isn&apos;t configured on this deployment yet.
+            </p>
+          )}
+          <p className="mt-2 text-[12px]">
+            Opens the Shortcuts app and asks to paste your API token once (create one above first) — it&apos;s baked
+            into your personal copy, never asked again. Everything below just calls this one shortcut.
+          </p>
+        </div>
+
+        <div>
+          <p className="mb-2 font-medium text-fg">Step 2 — SMS: two automations (iOS needs one per condition)</p>
+          <ol className="list-decimal space-y-2 pl-5 marker:font-medium marker:text-fg">
+            <li>
+              In Shortcuts → Automation, create <span className="font-medium text-fg">When I get a message</span>{" "}
+              containing <code className="rounded bg-card-2 px-1 font-mono text-[12px]">debited</code>. Repeat with a
+              second automation for <code className="rounded bg-card-2 px-1 font-mono text-[12px]">credited</code> —
+              &ldquo;Message Contains&rdquo; can only OR across two automations, not within one.
+            </li>
+            <li>
+              Set both to <span className="font-medium text-fg">Run Immediately</span>, notifications off, then add a{" "}
+              <span className="font-medium text-fg">Dictionary</span> action:{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">type: sms</code>,{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">body: Shortcut Input</code>,{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">timestamp: Current Date</code> — then{" "}
+              <span className="font-medium text-fg">Run Shortcut</span> → <span className="font-medium text-fg">Vyay:
+              Log Transaction</span>, passing that dictionary as input.
+            </li>
+          </ol>
+          <p className="mt-2 text-[12px]">
+            OTPs, promos, and reminders still reach the shortcut since it filters on message content, not what you set
+            up — Vyay always replies success so it never nags you about a rejected one.
+          </p>
+        </div>
+
+        <div>
+          <p className="mb-2 font-medium text-fg">Step 3 — Apple Wallet: one automation, fully automatic</p>
+          <ol className="list-decimal space-y-2 pl-5 marker:font-medium marker:text-fg">
+            <li>
+              In Shortcuts → Automation, create a <span className="font-medium text-fg">Transaction</span> automation
+              (Wallet section) — leave card/merchant filters empty to catch every Apple Pay payment.
+            </li>
+            <li>
+              Set <span className="font-medium text-fg">Run Immediately</span>, notifications off, then add a{" "}
+              <span className="font-medium text-fg">Dictionary</span> action:{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">type: wallet</code>,{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">merchant: Merchant</code>,{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">amount: Amount</code>,{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">card: Card</code>,{" "}
+              <code className="rounded bg-card-2 px-1 font-mono text-[12px]">timestamp: Current Date</code> (all
+              magic variables from the Transaction trigger) — then <span className="font-medium text-fg">Run
+              Shortcut</span> → <span className="font-medium text-fg">Vyay: Log Transaction</span>, passing that
+              dictionary as input.
+            </li>
+          </ol>
+          <p className="mt-2 text-[12px]">
+            Only fires on Apple Pay itself — a physical card swipe or a bank&apos;s own SMS/email for the same
+            purchase still lands separately; Vyay&apos;s cross-source dedup keeps it from double-counting.
+          </p>
+        </div>
+
+        <details className="text-[12px]">
+          <summary className="cursor-pointer font-medium text-fg">Building the shortcut yourself (for {origin})</summary>
+          <div className="mt-2 space-y-1 rounded-xl bg-card-2 p-3.5 font-mono text-[12px] text-fg">
+            <p>One action: Get Contents of URL</p>
+            <p className="pl-3">URL: {origin}/api/ingest</p>
+            <p className="pl-3">Method: POST</p>
+            <p className="pl-3">
+              Headers: Authorization: Bearer [tap the value, set to &quot;Ask Each Time&quot; — not a literal
+              &quot;Ask for Input&quot; action, which would re-prompt on every run]
+            </p>
+            <p className="pl-3">Request Body: JSON → Shortcut Input, forwarded as-is</p>
+            <p className="mt-1">
+              When sharing (Share → Copy iCloud Link), Shortcuts detects the &quot;Ask Each Time&quot; value and offers
+              to turn it into an import question — set its prompt to &quot;Vyay API token&quot;. Whoever imports the
+              link answers once; it&apos;s then fixed in their copy, never asked again.
+            </p>
+            <p className="mt-1">Full step-by-step: docs/shortcuts-setup.md in the repo.</p>
+          </div>
+        </details>
       </div>
     </Card>
   );
@@ -784,7 +923,9 @@ export function SettingsPanels() {
         <EncryptionKeyCard />
         <TokensCard />
         <ExportCard />
+        <StatementImportCard />
         <ShortcutCard />
+        <SmsWalletCard />
       </div>
     </Suspense>
   );

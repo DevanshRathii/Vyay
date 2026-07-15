@@ -4,9 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", async () => (await import("./helpers/pglite")).createTestDb());
 
 import { db } from "@/lib/db";
-import { shortcutEvents, transactions, users } from "@/lib/db/schema";
+import { categories, shortcutEvents, transactions, users } from "@/lib/db/schema";
 import { amountBidx } from "@/lib/blind-index";
-import { findCandidates, tryResolvePendingShortcuts, MATCH_WINDOW_HOURS } from "@/lib/match";
+import {
+  findCandidates,
+  pickAutoMatch,
+  tryResolvePendingShortcuts,
+  MATCH_AUTO_WINDOW_MS,
+  MATCH_WINDOW_HOURS,
+} from "@/lib/match";
 import { eq } from "drizzle-orm";
 
 const NOW = Date.now();
@@ -32,6 +38,7 @@ async function insertTxn(over: Partial<typeof transactions.$inferInsert> = {}) {
 beforeEach(async () => {
   await db.delete(shortcutEvents);
   await db.delete(transactions);
+  await db.delete(categories);
   await db.delete(users);
   const rows = await db.insert(users).values({ email: `u${Math.random()}@t.io` }).returning();
   userId = rows[0].id;
@@ -47,16 +54,22 @@ describe("findCandidates", () => {
     expect(c.map((x) => x.id)).toEqual([t.id]);
   });
 
-  it("prefers uncategorized, then closest in time", async () => {
-    const far = await insertTxn({ occurredAt: NOW - 3600 * 1000 });
-    const near = await insertTxn({ occurredAt: NOW - 60 * 1000 });
-    const categorized = await insertTxn({ occurredAt: NOW, categoryId: null });
-    // give one a category
-    await db.update(transactions).set({ categoryId: null }).where(eq(transactions.id, categorized.id));
+  it("orders by closeness in time first, regardless of category state", async () => {
+    const [cat] = await db.insert(categories).values({ userId, name: "Food" }).returning();
+    const far = await insertTxn({ occurredAt: NOW - 3600 * 1000, categoryId: null });
+    const near = await insertTxn({ occurredAt: NOW - 60 * 1000, categoryId: cat.id });
     const c = await findCandidates(userId, { amountPaise: 28500, direction: "debit", at: NOW });
-    expect(c[0].id).toBe(categorized.id); // closest uncategorized first
-    expect(c.map((x) => x.id)).toContain(far.id);
-    expect(c.map((x) => x.id)).toContain(near.id);
+    // `near` is closer in time despite being categorized — closeness wins.
+    expect(c.map((x) => x.id)).toEqual([near.id, far.id]);
+  });
+
+  it("uses category state only as a tiebreak between equidistant candidates", async () => {
+    const [cat] = await db.insert(categories).values({ userId, name: "Food" }).returning();
+    const uncategorized = await insertTxn({ occurredAt: NOW - 60 * 1000, categoryId: null });
+    const categorized = await insertTxn({ occurredAt: NOW + 60 * 1000, categoryId: cat.id });
+    const c = await findCandidates(userId, { amountPaise: 28500, direction: "debit", at: NOW });
+    expect(c[0].id).toBe(uncategorized.id);
+    expect(c[1].id).toBe(categorized.id);
   });
 
   it("ignores soft-deleted transactions", async () => {
@@ -149,5 +162,92 @@ describe("keyed matching — blind index equality", () => {
     const after = (await db.select().from(transactions).where(eq(transactions.id, t.id)))[0];
     expect(after.notes).toBeNull();
     expect(after.categoryId).toBe(evRows[0].categoryId);
+  });
+});
+
+describe("pickAutoMatch — tiered auto-match decision", () => {
+  it("auto-applies a sole candidate anywhere in the wide window", () => {
+    const chosen = pickAutoMatch([{ id: "a", occurredAt: NOW - 3600 * 1000 }], NOW);
+    expect(chosen?.id).toBe("a");
+  });
+
+  it("returns null for no candidates", () => {
+    expect(pickAutoMatch([], NOW)).toBeNull();
+  });
+
+  it("with multiple candidates, auto-applies only the sole one inside the tight window", () => {
+    const candidates = [
+      { id: "close", occurredAt: NOW - 5 * 60 * 1000 }, // 5 min away
+      { id: "far", occurredAt: NOW - 3600 * 1000 }, // 1 hour away
+    ];
+    expect(pickAutoMatch(candidates, NOW)?.id).toBe("close");
+  });
+
+  it("stays ambiguous when two candidates are both inside the tight window (two same-amount purchases same day)", () => {
+    const candidates = [
+      { id: "a", occurredAt: NOW - 5 * 60 * 1000 },
+      { id: "b", occurredAt: NOW + 10 * 60 * 1000 },
+    ];
+    expect(pickAutoMatch(candidates, NOW)).toBeNull();
+  });
+
+  it("the tight window boundary is exactly MATCH_AUTO_WINDOW_MS", () => {
+    const candidates = [
+      { id: "inside", occurredAt: NOW - MATCH_AUTO_WINDOW_MS },
+      { id: "outside", occurredAt: NOW - MATCH_AUTO_WINDOW_MS - 1 },
+    ];
+    expect(pickAutoMatch(candidates, NOW)?.id).toBe("inside");
+  });
+});
+
+describe("tryResolvePendingShortcuts — same-amount-same-day disambiguation", () => {
+  it("auto-matches the time-nearest pending log when two same-amount logs exist", async () => {
+    const closeRows = await db
+      .insert(shortcutEvents)
+      .values({ userId, amountPaise: 28500, direction: "debit", categoryName: "Food", occurredAt: NOW - 5 * 60 * 1000 })
+      .returning();
+    const farRows = await db
+      .insert(shortcutEvents)
+      .values({ userId, amountPaise: 28500, direction: "debit", categoryName: "Food", occurredAt: NOW - 3600 * 1000 })
+      .returning();
+
+    const t = await insertTxn({ occurredAt: NOW });
+    await tryResolvePendingShortcuts(userId, t, t.amountPaise!);
+
+    const close = (await db.select().from(shortcutEvents).where(eq(shortcutEvents.id, closeRows[0].id)))[0];
+    const far = (await db.select().from(shortcutEvents).where(eq(shortcutEvents.id, farRows[0].id)))[0];
+    expect(close.status).toBe("matched");
+    expect(close.matchedTransactionId).toBe(t.id);
+    expect(far.status).toBe("pending"); // left for manual resolution on /matches
+  });
+
+  it("leaves both pending when two same-amount logs are both within the tight window", async () => {
+    const aRows = await db
+      .insert(shortcutEvents)
+      .values({ userId, amountPaise: 28500, direction: "debit", categoryName: "Food", occurredAt: NOW - 5 * 60 * 1000 })
+      .returning();
+    const bRows = await db
+      .insert(shortcutEvents)
+      .values({ userId, amountPaise: 28500, direction: "debit", categoryName: "Food", occurredAt: NOW + 10 * 60 * 1000 })
+      .returning();
+
+    const t = await insertTxn({ occurredAt: NOW });
+    await tryResolvePendingShortcuts(userId, t, t.amountPaise!);
+
+    const a = (await db.select().from(shortcutEvents).where(eq(shortcutEvents.id, aRows[0].id)))[0];
+    const b = (await db.select().from(shortcutEvents).where(eq(shortcutEvents.id, bRows[0].id)))[0];
+    expect(a.status).toBe("pending");
+    expect(b.status).toBe("pending");
+  });
+
+  it("falls back to createdAt for a legacy event with no occurredAt", async () => {
+    const evRows = await db
+      .insert(shortcutEvents)
+      .values({ userId, amountPaise: 28500, direction: "debit", categoryName: "Food", createdAt: NOW })
+      .returning();
+    const t = await insertTxn({ occurredAt: NOW });
+    await tryResolvePendingShortcuts(userId, t, t.amountPaise!);
+    const after = (await db.select().from(shortcutEvents).where(eq(shortcutEvents.id, evRows[0].id)))[0];
+    expect(after.status).toBe("matched");
   });
 });

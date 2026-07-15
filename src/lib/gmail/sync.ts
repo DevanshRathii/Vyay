@@ -6,7 +6,7 @@ import { loadCategorizerContext } from "@/lib/categorize";
 import { loadContactContext } from "@/lib/contacts/match";
 import { ingestEmail } from "@/lib/ingest";
 import { looksRelevant, senderQuery } from "@/lib/parsing/providers";
-import { chunk, mapLimit, sleep } from "@/lib/utils";
+import { chunk, mapLimit, sleep, TRACKING_BASELINE_MS } from "@/lib/utils";
 import { gmailFor } from "./client";
 import { headerFromMetadata, toEmailMessage } from "./fetch";
 
@@ -96,8 +96,9 @@ function isMissingMessageError(err: unknown): boolean {
   return gmailErrorStatus(err) === 404;
 }
 
-/** Fixed anchor for a brand-new connection's first sync: 1-Jan-2026, 00:00 IST. */
-const INITIAL_SYNC_START_UNIX_SEC = Math.floor((Date.UTC(2026, 0, 1) - 5.5 * 60 * 60 * 1000) / 1000);
+/** Fixed anchor for a brand-new connection's first sync: 1-Jan-2026, 00:00 IST
+ *  — same floor every import path (statements, historical SMS) enforces. */
+const INITIAL_SYNC_START_UNIX_SEC = Math.floor(TRACKING_BASELINE_MS / 1000);
 
 function buildQuery(conn: GmailConnection, opts: { afterUnixSec?: number } = {}): string {
   const selectedProviders = conn.selectedProviders ? (JSON.parse(conn.selectedProviders) as string[]) : null;

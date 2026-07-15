@@ -7,17 +7,20 @@ import {
   ArrowUpRight,
   ChevronRight,
   Copy,
+  Flag,
   Pencil,
   RotateCcw,
   Search,
   Sparkles,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { Badge, Button, Card, ConfirmButton, Dialog, Empty, Input, Label, Select, Skeleton, Spinner } from "@/components/ui";
 import { useE2EOptional } from "@/components/e2e-provider";
+import type { TransactionEncPayload } from "@/lib/ingest";
 import { matchesLedgerFilters } from "@/lib/transactions";
 import { useTransactions, type DecryptedTxn } from "@/lib/use-transactions";
 import { cn, formatINR } from "@/lib/utils";
@@ -213,10 +216,18 @@ function LedgerInner() {
       title={showDeleted ? "No deleted transactions" : filtersActive ? "No transactions match your filters" : "No transactions found"}
       hint={filtersActive ? undefined : "Sync Gmail from Settings to import transactions."}
     >
-      {filtersActive && (
+      {filtersActive ? (
         <Button variant="secondary" size="sm" onClick={clearAllFilters} className="mt-1">
           Clear filters
         </Button>
+      ) : (
+        !showDeleted && (
+          <Link href="/settings">
+            <Button variant="secondary" size="sm" className="mt-1">
+              Import a statement
+            </Button>
+          </Link>
+        )
       )}
     </Empty>
   );
@@ -502,6 +513,9 @@ function LedgerInner() {
       }} onDeleteToggle={async () => {
         if (editing) await patch(editing.id, { deleted: !editing.deletedAt });
         setEditing(null);
+      }} onUnmarkDuplicate={async () => {
+        if (editing) await patch(editing.id, { duplicateOfId: null });
+        setEditing(null);
       }} />
     </div>
   );
@@ -521,15 +535,18 @@ function EditDialog({
   onClose,
   onSave,
   onDeleteToggle,
+  onUnmarkDuplicate,
 }: {
   txn: Txn | null;
   cats: CategoryRow[];
   onClose: () => void;
   onSave: (body: { categoryId: string | null; notes: string | null }) => Promise<void>;
   onDeleteToggle: () => Promise<void>;
+  onUnmarkDuplicate: () => Promise<void>;
 }) {
   const [categoryId, setCategoryId] = useState<string>(txn?.categoryId ?? "");
   const [notes, setNotes] = useState(txn?.notes ?? "");
+  const [reporting, setReporting] = useState(false);
 
   return (
     <Dialog open={!!txn} onClose={onClose} title="Edit transaction">
@@ -549,6 +566,15 @@ function EditDialog({
             </p>
             {txn.referenceNumber && <p className="mt-0.5 text-[12px] text-muted">Ref {txn.referenceNumber}</p>}
             {txn.emailSubject && <p className="mt-1 line-clamp-2 text-[12px] text-muted">“{txn.emailSubject}”</p>}
+            {txn.duplicateOfId && (
+              <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[12px] text-amber-500">
+                <Copy className="h-3.5 w-3.5 shrink-0" />
+                Flagged as a possible duplicate — excluded from totals and export.
+                <button type="button" className="font-medium underline underline-offset-2" onClick={onUnmarkDuplicate}>
+                  Not a duplicate
+                </button>
+              </p>
+            )}
             <div className="mt-2 flex flex-col gap-0.5 border-t border-line pt-2">
               <p className={cn("text-[11px]", isLowConfidenceMerchant(txn) ? "text-amber-500" : "text-muted")}>
                 Merchant: {txn.merchantSource ? MERCHANT_SOURCE_LABELS[txn.merchantSource] ?? txn.merchantSource : "unknown"}
@@ -589,21 +615,125 @@ function EditDialog({
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Add a note…" maxLength={500} />
           </div>
           <div className="flex items-center justify-between pt-1">
-            {txn.deletedAt ? (
-              <Button variant="danger" size="sm" onClick={onDeleteToggle}>
-                <RotateCcw className="h-3.5 w-3.5" /> Restore
+            <div className="flex items-center gap-1.5">
+              {txn.deletedAt ? (
+                <Button variant="danger" size="sm" onClick={onDeleteToggle}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Restore
+                </Button>
+              ) : (
+                <ConfirmButton
+                  size="sm"
+                  confirmTitle="Delete transaction?"
+                  confirmMessage="It moves to the Deleted filter and can be restored later — this doesn't remove it permanently."
+                  onConfirm={onDeleteToggle}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </ConfirmButton>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => setReporting(true)} title="Send the original email to Devansh to fix parsing">
+                <Flag className="h-3.5 w-3.5" /> Report a bad parse
               </Button>
-            ) : (
-              <ConfirmButton
-                size="sm"
-                confirmTitle="Delete transaction?"
-                confirmMessage="It moves to the Deleted filter and can be restored later — this doesn't remove it permanently."
-                onConfirm={onDeleteToggle}
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Delete
-              </ConfirmButton>
-            )}
+            </div>
             <Button onClick={() => onSave({ categoryId: categoryId || null, notes: notes || null })}>Save</Button>
+          </div>
+        </div>
+      )}
+      {txn && <ReportParseIssueDialog open={reporting} onClose={() => setReporting(false)} txnId={txn.id} />}
+    </Dialog>
+  );
+}
+
+/** "Report a bad parse": fetches the one raw email on demand (not in the
+ *  list payload), decrypts it client-side if the account is keyed, shows
+ *  the user exactly what will be sent with a chance to edit/redact before
+ *  an explicit, consented submission. */
+function ReportParseIssueDialog({ open, onClose, txnId }: { open: boolean; onClose: () => void; txnId: string }) {
+  const e2e = useE2EOptional();
+  const [text, setText] = useState("");
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setDone(false);
+    setError(null);
+    setNote("");
+    setLoading(true);
+    fetch(`/api/transactions/${txnId}/raw`)
+      .then((r) => r.json())
+      .then((body: { raw: string | null; encPayload: string | null }) => {
+        if (body.encPayload && e2e?.status === "ready") {
+          const payload = e2e.decrypt<TransactionEncPayload>(body.encPayload);
+          setText(payload.raw ?? "");
+        } else {
+          setText(body.raw ?? "");
+        }
+      })
+      .catch(() => setError("Couldn't load the original email."))
+      .finally(() => setLoading(false));
+  }, [open, txnId, e2e]);
+
+  async function submit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/parse-samples", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "email", text, note: note.trim() || undefined }),
+      });
+      if (!res.ok) throw new Error("Submit failed.");
+      setDone(true);
+    } catch {
+      setError("Couldn't submit — try again in a moment.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Report a bad parse" wide>
+      {done ? (
+        <div className="flex flex-col items-center gap-3 py-6 text-center">
+          <p className="text-[14px] font-medium">Thanks — this helps fix parsing for everyone.</p>
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-[13px] text-muted">
+            This sends this one email&apos;s text to the developer to improve parsing. Review and edit it below first
+            — remove anything you don&apos;t want to share.
+          </p>
+          {loading ? (
+            <div className="flex h-32 items-center justify-center">
+              <Spinner />
+            </div>
+          ) : (
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={10}
+              className="w-full rounded-xl border border-line bg-card-2 p-3 font-mono text-[12px] leading-relaxed"
+            />
+          )}
+          <div>
+            <Label>What&apos;s wrong? (optional)</Label>
+            <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. merchant name is wrong" maxLength={500} />
+          </div>
+          {error && <p className="text-[13px] text-negative">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button size="sm" disabled={loading || submitting || !text.trim()} onClick={submit}>
+              {submitting ? <Spinner className="border-white/40 border-t-white" /> : null}
+              Send
+            </Button>
           </div>
         </div>
       )}

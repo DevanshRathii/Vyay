@@ -202,7 +202,7 @@ export function Dashboard() {
     if (!keyed || !catsData) return null;
     const yearAgo = Date.now() - 366 * 24 * 3600 * 1000;
     const analyticsRows: AnalyticsRow[] = txnRows
-      .filter((t) => t.deletedAt == null)
+      .filter((t) => t.deletedAt == null && t.duplicateOfId == null)
       .map((t) => ({
         occurredAt: t.occurredAt,
         amountPaise: t.amountPaise,

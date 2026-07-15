@@ -105,11 +105,22 @@ export const transactions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** null for manual/seed transactions */
+    /** null for manual/seed transactions; source-prefixed for non-Gmail rows
+     *  (sms:<hash>, wallet:<hash>, stmt:<hash>) — reused rather than renamed
+     *  to keep the existing (userId, gmailMessageId) unique index doing
+     *  double duty as the general idempotency key across every ingestion
+     *  source. */
     gmailMessageId: text("gmail_message_id"),
-    source: text("source").notNull().default("gmail"), // gmail | manual | seed
+    source: text("source").notNull().default("gmail"), // gmail | sms | wallet | statement | manual | seed
     /** transaction time, ms epoch */
     occurredAt: epochMs("occurred_at").notNull(),
+    /** False when occurredAt is a fallback guess (arrival time, or a bare
+     *  date with no clock time) rather than an actual time-of-day read from
+     *  the message — see src/lib/parsing/engine.ts's extractOccurredAt.
+     *  Cross-source dedup widens its matching window when either side of a
+     *  comparison isn't precise, since a 3-minute window is meaningless
+     *  against a guessed timestamp. */
+    occurredAtPrecise: boolean("occurred_at_precise").notNull().default(true),
     /** stored in paise to avoid floating point issues; bigint so very large
      *  transfers fit. Null for keyed users — amount lives inside encPayload. */
     amountPaise: bigint("amount_paise", { mode: "number" }),
@@ -143,6 +154,11 @@ export const transactions = pgTable(
      *  src/lib/blind-index.ts. Lets keyed-user dedup/matching run an
      *  equality query without a plaintext amount column. */
     amountBidx: text("amount_bidx"),
+    /** blind-index HMAC of (userId, normalizedReferenceNumber) — see
+     *  src/lib/blind-index.refBidx. Strong cross-source dedup signal (a UPI
+     *  RRN is the same regardless of which source saw it); null when no
+     *  reference was parsed or it was too short to trust. */
+    refBidx: text("ref_bidx"),
     deletedAt: epochMs("deleted_at"),
     createdAt: now(),
     updatedAt: epochMs("updated_at")
@@ -155,6 +171,7 @@ export const transactions = pgTable(
     index("txn_user_amount_idx").on(t.userId, t.amountPaise),
     index("txn_user_category_idx").on(t.userId, t.categoryId),
     index("txn_user_bidx_idx").on(t.userId, t.amountBidx),
+    index("txn_user_ref_bidx_idx").on(t.userId, t.refBidx),
   ],
 );
 
@@ -233,6 +250,12 @@ export const shortcutEvents = pgTable(
     amountBidx: text("amount_bidx"),
     status: text("status").notNull().default("pending"), // pending | matched | resolved | dismissed
     matchedTransactionId: text("matched_transaction_id"),
+    /** The logged expense's actual time, from the Shortcut's `timestamp`
+     *  body field — distinct from createdAt (when the log HTTP request
+     *  landed). Null for older events logged before this field existed;
+     *  matching falls back to createdAt for those. Powers same-day,
+     *  same-amount disambiguation (src/lib/match.ts). */
+    occurredAt: epochMs("occurred_at"),
     createdAt: now(),
   },
   (t) => [index("shortcut_user_idx").on(t.userId, t.status)],
@@ -259,6 +282,51 @@ export const preapprovedEmails = pgTable("preapproved_emails", {
   createdAt: now(),
 });
 
+/**
+ * Operational telemetry only — NOT per-user data, no userId, no message
+ * content. Running counts keyed by parser provider id (src/lib/parsing/
+ * providers.ts), incremented atomically at ingest. Deliberately separate
+ * from `transactions` so this works identically for keyed accounts, whose
+ * `bank`/merchant columns are sealed and unreadable server-side — the
+ * counts are derived from values already in hand transiently at ingest,
+ * before sealing, and never touch per-user encrypted storage.
+ */
+export const parseHealthStats = pgTable("parse_health_stats", {
+  id: id(),
+  provider: text("provider").notNull().unique(),
+  totalCount: integer("total_count").notNull().default(0),
+  merchantHits: integer("merchant_hits").notNull().default(0),
+  upiHits: integer("upi_hits").notNull().default(0),
+  refHits: integer("ref_hits").notNull().default(0),
+  categorizedHits: integer("categorized_hits").notNull().default(0),
+  updatedAt: epochMs("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
+
+/**
+ * User-donated parse-failure samples ("Report a bad parse" in the Ledger).
+ * Stored in the clear BY INTENT — the user reviews and can edit/redact the
+ * text before submitting; this is a knowing donation for improving parsing,
+ * not transaction data, and is unrelated to the zero-access encryption
+ * boundary (which protects data the user didn't choose to share).
+ */
+export const parseSamples = pgTable(
+  "parse_samples",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // email | sms
+    text: text("text").notNull(),
+    note: text("note"),
+    resolved: boolean("resolved").notNull().default(false),
+    createdAt: now(),
+  },
+  (t) => [index("parse_samples_resolved_idx").on(t.resolved)],
+);
+
 export type User = typeof users.$inferSelect;
 export type GmailConnection = typeof gmailConnections.$inferSelect;
 export type Category = typeof categories.$inferSelect;
@@ -269,3 +337,5 @@ export type ShortcutEvent = typeof shortcutEvents.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
 export type FeedbackMessage = typeof feedbackMessages.$inferSelect;
 export type PreapprovedEmail = typeof preapprovedEmails.$inferSelect;
+export type ParseHealthStat = typeof parseHealthStats.$inferSelect;
+export type ParseSample = typeof parseSamples.$inferSelect;

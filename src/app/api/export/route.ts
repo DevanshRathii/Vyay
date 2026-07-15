@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -37,7 +37,10 @@ export async function GET(req: Request) {
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
-    .where(and(...conds))
+    // Flagged duplicates stay visible in the Ledger (with their badge) but
+    // are excluded here — an export is a record to keep, and re-exporting a
+    // payment counted twice defeats the point of dedup existing at all.
+    .where(and(...conds, isNull(transactions.duplicateOfId)))
     .orderBy(desc(transactions.occurredAt));
 
   const wb = buildLedgerWorkbook(
