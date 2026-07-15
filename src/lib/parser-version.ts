@@ -17,4 +17,11 @@
  * provider whose emails were never ingested before, tightening the OTP
  * classifier for spam that was already being rejected).
  */
-export const PARSER_VERSION = 1;
+// v2: SMS/statement work added real classifier+engine fixes that also apply
+// to already-imported email — "deposited" as a recognized credit verb, bare
+// leading-verb phrasing ("Sent Rs.X", "Spent Rs.X On"), ISO-format
+// "YYYY-MM-DD:HH:MM:SS" timestamps, and the segment-based VPA extractor
+// (fixes over-greedy hyphen narrations like "UPI-SWIGGY-swiggy@icici-...").
+// A user whose salary-deposit or hyphen-narration emails silently failed to
+// parse before this needs their existing rows reprocessed, not just new mail.
+export const PARSER_VERSION = 2;
